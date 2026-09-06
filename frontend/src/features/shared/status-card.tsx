@@ -5,12 +5,17 @@ type StatusRow = {
 
 type StatusCardProps = {
   title: string;
-  loading: boolean;
+  loading?: boolean;
   error?: string;
   rows: StatusRow[];
 };
 
-export function StatusCard({ title, loading, error, rows }: StatusCardProps) {
+export function StatusCard({
+  title,
+  loading = false,
+  error,
+  rows,
+}: StatusCardProps) {
   return (
     <div className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
       <h2 className="font-semibold">{title}</h2>

@@ -1,11 +1,13 @@
-# Deploy frontend on Railway (skip broken Vercel monorepo setup)
+# Deploy frontend on Railway
 
-## 1. Add a second Railway service
+## Why it crashed before
 
-1. Railway project → **+ New** → **GitHub Repo** → same `civicsense-platform` repo
-2. Name it `frontend`
+Root `railway.toml` was forcing `uvicorn` as the start command on **every**
+service — that kills the Node/Next.js frontend. Fixed in latest commit.
 
-## 2. Variables tab — paste all of these
+## Frontend service — Variables tab
+
+Paste **all** of these:
 
 ```
 RAILWAY_DOCKERFILE_PATH=Dockerfile.frontend
@@ -19,12 +21,20 @@ NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/dashboard
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=
 ```
 
-## 3. Generate public domain
+## Backend service — add this variable too
 
-Settings → Networking → **Generate Domain** for the frontend service.
+```
+RAILWAY_DOCKERFILE_PATH=Dockerfile.backend
+```
 
-## 4. Clerk
+## Clear wrong start command (frontend)
 
-Add your new frontend `https://....up.railway.app` URL to Clerk → Allowed redirect URLs and Allowed origins.
+Settings → **Deploy** → **Custom Start Command** → leave **empty** → Save
 
-Backend CORS already allows `*.up.railway.app` automatically.
+(Railway must use `node server.js` from the Dockerfile, not uvicorn.)
+
+## Then
+
+1. Redeploy frontend
+2. Settings → Networking → **Generate Domain**
+3. Clerk → add that URL to Allowed origins + redirect URLs

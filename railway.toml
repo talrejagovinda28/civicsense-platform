@@ -1,8 +1,11 @@
+# Shared Railway config — each service MUST set its own dockerfile via Variables:
+#   Backend:  RAILWAY_DOCKERFILE_PATH=Dockerfile.backend
+#   Frontend: RAILWAY_DOCKERFILE_PATH=Dockerfile.frontend
+#
+# Do NOT set a global startCommand here — it breaks the frontend (Node) service.
+
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "Dockerfile.backend"
 
 [deploy]
-startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
-healthcheckPath = "/api/v1/health"
 restartPolicyType = "ON_FAILURE"

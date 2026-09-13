@@ -1,5 +1,7 @@
+"use client";
+
 import Link from "next/link";
-import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
+import { Show, SignInButton, UserButton } from "@clerk/nextjs";
 
 export function HomeView() {
   return (
@@ -15,15 +17,15 @@ export function HomeView() {
       </div>
 
       <div className="flex items-center gap-4">
-        <SignedOut>
+        <Show when="signed-out">
           <SignInButton mode="modal">
             <button className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white">
               Sign in
             </button>
           </SignInButton>
-        </SignedOut>
+        </Show>
 
-        <SignedIn>
+        <Show when="signed-in">
           <Link
             href="/complaints"
             className="rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium"
@@ -43,7 +45,7 @@ export function HomeView() {
             Dashboard
           </Link>
           <UserButton />
-        </SignedIn>
+        </Show>
       </div>
     </main>
   );

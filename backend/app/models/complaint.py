@@ -13,8 +13,13 @@ from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from app.models.category import Category
+    from app.models.city import City
     from app.models.complaint_image import ComplaintImage
     from app.models.complaint_status_history import ComplaintStatusHistory
+    from app.models.electoral_ward import ElectoralWard
+    from app.models.external_submission import ExternalSubmission
+    from app.models.routing import Department
+    from app.models.ward_office import WardOffice
 
 
 class ComplaintStatus(StrEnum):
@@ -48,12 +53,42 @@ class Complaint(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     ai_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    latitude: Mapped[float] = mapped_column(nullable=False)
-    longitude: Mapped[float] = mapped_column(nullable=False)
-    google_place_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    latitude: Mapped[float | None] = mapped_column(nullable=True)
+    longitude: Mapped[float | None] = mapped_column(nullable=True)
+    google_place_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     address: Mapped[str] = mapped_column(String(500), nullable=False)
     ward: Mapped[str | None] = mapped_column(String(100), nullable=True)
     city: Mapped[str] = mapped_column(String(100), default="Pune", nullable=False)
+
+    city_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("cities.id"),
+        nullable=True,
+        index=True,
+    )
+    electoral_ward_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("electoral_wards.id"),
+        nullable=True,
+        index=True,
+    )
+    ward_office_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ward_offices.id"),
+        nullable=True,
+    )
+    department_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("departments.id"),
+        nullable=True,
+    )
+    public_latitude: Mapped[float | None] = mapped_column(nullable=True)
+    public_longitude: Mapped[float | None] = mapped_column(nullable=True)
+
+    city_ref = relationship("City", foreign_keys=[city_id])
+    electoral_ward = relationship("ElectoralWard", foreign_keys=[electoral_ward_id])
+    ward_office = relationship("WardOffice", foreign_keys=[ward_office_id])
+    department = relationship("Department", foreign_keys=[department_id])
 
     category: Mapped[Category] = relationship(
         foreign_keys=[category_id],

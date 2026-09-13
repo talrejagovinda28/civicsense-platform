@@ -16,6 +16,7 @@ from app.schemas.complaint_create import (
     SuggestCategoryResponse,
 )
 from app.schemas.complaint_status import StatusUpdateRequest
+from app.services.accountability import resolve_jurisdiction_for_complaint
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,14 @@ def generate_title(category_name: str, address: str) -> str:
         landmark = address.strip()
     title = f"{category_name} near {landmark}"
     return title[:200]
+
+
+def _public_coordinate(value: float) -> float:
+    return round(value, 3)
+
+
+def _normalize_city_slug(city: str) -> str:
+    return city.strip().lower().replace(" ", "-")
 
 
 def _allowed_next_statuses(
@@ -194,7 +203,8 @@ def create_complaint(
     payload: ComplaintCreate,
 ) -> Complaint:
     _enforce_rate_limit(db, current_user.user_id)
-    _warn_if_outside_pune(payload.latitude, payload.longitude)
+    if payload.latitude is not None and payload.longitude is not None:
+        _warn_if_outside_pune(payload.latitude, payload.longitude)
 
     category = _get_active_category(db, payload.category_id)
 
@@ -202,6 +212,22 @@ def create_complaint(
         _get_active_category(db, payload.ai_suggested_category_id)
 
     title = payload.title or generate_title(category.name, payload.address)
+    city_slug = _normalize_city_slug(payload.city_slug or payload.city or "pune")
+
+    jurisdiction = resolve_jurisdiction_for_complaint(
+        db,
+        city_slug=city_slug,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        category_id=payload.category_id,
+    )
+
+    public_latitude = (
+        _public_coordinate(payload.latitude) if payload.latitude is not None else None
+    )
+    public_longitude = (
+        _public_coordinate(payload.longitude) if payload.longitude is not None else None
+    )
 
     complaint = Complaint(
         user_id=current_user.user_id,
@@ -215,8 +241,14 @@ def create_complaint(
         longitude=payload.longitude,
         google_place_id=payload.google_place_id,
         address=payload.address,
-        ward=payload.ward,
-        city=payload.city,
+        ward=jurisdiction.get("ward_label") or payload.ward,
+        city=payload.city or "Pune",
+        city_id=jurisdiction["city_id"],
+        electoral_ward_id=jurisdiction["electoral_ward_id"],
+        ward_office_id=jurisdiction["ward_office_id"],
+        department_id=jurisdiction["department_id"],
+        public_latitude=public_latitude,
+        public_longitude=public_longitude,
     )
 
     for image in payload.images:

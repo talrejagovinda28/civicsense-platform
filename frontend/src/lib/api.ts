@@ -70,6 +70,94 @@ export type ComplaintImageResponse = {
   sort_order: number;
 };
 
+export type CityResponse = {
+  id: string;
+  slug: string;
+  name: string;
+  state_name: string;
+  state_code: string | null;
+  country_code: string;
+  status: "active" | "preview" | "disabled";
+  municipality_name: string | null;
+  center_lat: number;
+  center_lng: number;
+  default_zoom: number;
+  supports_reporting: boolean;
+  supports_ward_map: boolean;
+  supports_accountability: boolean;
+  map_data_version: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProvenanceInfo = {
+  source_url: string | null;
+  source_name: string | null;
+  verified_at: string | null;
+  notes: string | null;
+};
+
+export type OfficialSummary = {
+  full_name: string;
+  party: string | null;
+  seat_label: string;
+  reservation: string | null;
+};
+
+export type DepartmentSummary = {
+  id: string;
+  name: string;
+  slug: string;
+};
+
+export type WardOfficeSummary = {
+  id: string;
+  name: string;
+  slug: string;
+};
+
+export type ElectoralWardSummary = {
+  id: string;
+  ward_no: number;
+  name: string;
+};
+
+export type RoutingChannelSummary = {
+  id: string;
+  channel_type: string;
+  label: string;
+  value: string;
+  url: string | null;
+  is_official: boolean;
+  notes: string | null;
+  provenance: ProvenanceInfo | null;
+};
+
+export type AccountabilityResponse = {
+  city_slug: string;
+  municipality_name: string;
+  inside_supported_area: boolean;
+  electoral_ward: ElectoralWardSummary | null;
+  ward_office: WardOfficeSummary | null;
+  department: DepartmentSummary | null;
+  elected_representatives: OfficialSummary[];
+  routing_channels: RoutingChannelSummary[];
+  warnings: string[];
+  provenance: ProvenanceInfo | null;
+};
+
+export type ExternalSubmissionResponse = {
+  id: string;
+  complaint_id: string;
+  routing_channel_id: string | null;
+  provider: string;
+  status: string;
+  external_token: string | null;
+  status_url: string | null;
+  forwarded_at: string | null;
+  token_received_at: string | null;
+};
+
 export type ComplaintFeedItem = {
   id: string;
   title: string;
@@ -80,6 +168,10 @@ export type ComplaintFeedItem = {
   city: string;
   images: ComplaintImageResponse[];
   created_at: string;
+  public_latitude: number | null;
+  public_longitude: number | null;
+  electoral_ward_id: string | null;
+  category_id: string | null;
 };
 
 export type PaginatedComplaints = {
@@ -107,7 +199,81 @@ export type ComplaintDetail = ComplaintFeedItem & {
   ai_suggested_category_id?: string | null;
   ai_confidence?: number | null;
   status_history?: StatusHistoryItem[];
+  department_id?: string | null;
+  ward_office_id?: string | null;
+  city_id?: string | null;
+  external_submission?: ExternalSubmissionResponse | null;
+  approximate_location_label?: string | null;
 };
+
+export type ComplaintFilters = {
+  city?: string;
+  electoral_ward_id?: string;
+  status?: string;
+  category_id?: string;
+  skip?: number;
+  limit?: number;
+};
+
+function buildQueryString(params: Record<string, string | number | undefined>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") {
+      search.set(key, String(value));
+    }
+  }
+  const query = search.toString();
+  return query ? `?${query}` : "";
+}
+
+export async function getCities(): Promise<CityResponse[]> {
+  return apiFetch<CityResponse[]>("/api/v1/cities", null);
+}
+
+export async function getCity(slug: string): Promise<CityResponse> {
+  return apiFetch<CityResponse>(`/api/v1/cities/${slug}`, null);
+}
+
+export type WardGeoJson = {
+  type: "FeatureCollection";
+  features: object[];
+};
+
+export async function getWardGeoJson(slug: string): Promise<WardGeoJson> {
+  const response = await fetch(`${API_URL}/api/v1/cities/${slug}/wards/geojson`);
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `Request failed: ${response.status}`);
+  }
+  return response.json() as Promise<WardGeoJson>;
+}
+
+export async function getAccountability(
+  citySlug: string,
+  lat: number,
+  lng: number,
+  categoryId: string,
+): Promise<AccountabilityResponse> {
+  const query = buildQueryString({ lat, lng, category_id: categoryId });
+  return apiFetch<AccountabilityResponse>(
+    `/api/v1/cities/${citySlug}/accountability${query}`,
+    null,
+  );
+}
+
+export async function getComplaints(
+  filters: ComplaintFilters = {},
+): Promise<PaginatedComplaints> {
+  const query = buildQueryString({
+    city: filters.city,
+    electoral_ward_id: filters.electoral_ward_id,
+    status: filters.status,
+    category_id: filters.category_id,
+    skip: filters.skip,
+    limit: filters.limit,
+  });
+  return apiFetch<PaginatedComplaints>(`/api/v1/complaints${query}`, null);
+}
 
 export function validateImageFile(file: File): string | null {
   if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
@@ -156,9 +322,9 @@ export async function uploadToCloudinary(
 export type CreateComplaintPayload = {
   description: string;
   category_id: string;
-  latitude: number;
-  longitude: number;
-  google_place_id: string;
+  latitude: number | null;
+  longitude: number | null;
+  google_place_id: string | null;
   address: string;
   images: {
     cloudinary_url: string;
@@ -168,9 +334,43 @@ export type CreateComplaintPayload = {
   title?: string;
   ward?: string | null;
   city?: string;
+  city_slug?: string;
   ai_suggested_category_id?: string | null;
   ai_confidence?: number | null;
 };
+
+export type ExternalSubmissionStartPayload = {
+  routing_channel_id?: string | null;
+};
+
+export type ExternalSubmissionTokenPayload = {
+  external_token: string;
+  status_url?: string | null;
+};
+
+export async function startExternalSubmission(
+  token: string,
+  complaintId: string,
+  payload: ExternalSubmissionStartPayload = {},
+): Promise<ExternalSubmissionResponse> {
+  return apiFetch<ExternalSubmissionResponse>(
+    `/api/v1/complaints/${complaintId}/external-submission/start`,
+    token,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+export async function saveExternalSubmissionToken(
+  token: string,
+  complaintId: string,
+  payload: ExternalSubmissionTokenPayload,
+): Promise<ExternalSubmissionResponse> {
+  return apiFetch<ExternalSubmissionResponse>(
+    `/api/v1/complaints/${complaintId}/external-submission/token`,
+    token,
+    { method: "PATCH", body: JSON.stringify(payload) },
+  );
+}
 
 export async function createComplaint(
   token: string,
@@ -189,8 +389,15 @@ export async function getComplaint(
   return apiFetch<ComplaintDetail>(`/api/v1/complaints/${complaintId}`, token);
 }
 
-export async function getOfficerQueue(token: string): Promise<ComplaintFeedItem[]> {
-  return apiFetch<ComplaintFeedItem[]>("/api/v1/complaints/officer/queue", token);
+export async function getOfficerQueue(
+  token: string,
+  city?: string,
+): Promise<ComplaintFeedItem[]> {
+  const query = city ? buildQueryString({ city }) : "";
+  return apiFetch<ComplaintFeedItem[]>(
+    `/api/v1/complaints/officer/queue${query}`,
+    token,
+  );
 }
 
 export type StatusUpdatePayload = {
@@ -214,6 +421,13 @@ export const STATUS_LABELS: Record<string, string> = {
   in_progress: "In Progress",
   resolved: "Resolved",
   closed: "Closed",
+};
+
+export const STATUS_COLORS: Record<string, string> = {
+  submitted: "#2563eb",
+  in_progress: "#d97706",
+  resolved: "#16a34a",
+  closed: "#64748b",
 };
 
 export function getNextStatusOptions(

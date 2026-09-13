@@ -10,8 +10,8 @@ export default async function ComplaintDetailPage({ params }: ComplaintDetailPag
   const { id } = await params;
 
   return (
-    <main className="mx-auto min-h-screen max-w-3xl px-6 py-12">
-      <Link href="/complaints" className="text-sm text-neutral-500 hover:text-neutral-700">
+    <main className="mx-auto min-h-screen max-w-5xl px-6 py-12">
+      <Link href="/complaints" className="text-sm text-[var(--muted)] hover:text-civic-navy">
         ← Back to feed
       </Link>
       <div className="mt-6">

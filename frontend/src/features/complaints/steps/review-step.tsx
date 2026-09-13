@@ -1,5 +1,6 @@
 "use client";
 
+import { AccountabilityCard } from "@/features/accountability/accountability-card";
 import { useComplaintWizard } from "../wizard-context";
 
 export function ReviewStep() {
@@ -7,13 +8,13 @@ export function ReviewStep() {
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-neutral-600">
+      <p className="text-sm text-[var(--muted)]">
         Check everything looks correct before submitting your complaint.
       </p>
 
       {draft.images.length > 0 && (
         <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
             Photos
           </h3>
           <ul className="mt-2 grid gap-3 sm:grid-cols-3">
@@ -45,6 +46,14 @@ export function ReviewStep() {
         <ReviewRow label="Category" value={draft.categoryName} />
         <ReviewRow label="Description" value={draft.description} />
       </dl>
+
+      <AccountabilityCard
+        citySlug={draft.citySlug}
+        latitude={draft.latitude}
+        longitude={draft.longitude}
+        categoryId={draft.categoryId}
+        compact
+      />
     </div>
   );
 }
@@ -57,8 +66,8 @@ function ReviewRow({
   value: string | null;
 }) {
   return (
-    <div className="border-b border-neutral-100 pb-3">
-      <dt className="text-xs uppercase tracking-wide text-neutral-500">{label}</dt>
+    <div className="border-b border-[var(--border)] pb-3">
+      <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">{label}</dt>
       <dd className="mt-1 text-sm whitespace-pre-wrap">{value || "—"}</dd>
     </div>
   );

@@ -7,16 +7,18 @@ const PUNE_CENTER = { lat: 18.5204, lng: 73.8567 };
 const MAP_LIBRARIES: ("places")[] = ["places"];
 
 export type MapLocation = {
-  latitude: number;
-  longitude: number;
+  latitude: number | null;
+  longitude: number | null;
   address: string;
-  googlePlaceId: string;
+  googlePlaceId: string | null;
+  ward?: string | null;
 };
 
 type MapPickerProps = {
   latitude: number | null;
   longitude: number | null;
   address: string | null;
+  ward: string | null;
   onLocationChange: (location: MapLocation) => void;
 };
 
@@ -24,6 +26,7 @@ export function MapPicker({
   latitude,
   longitude,
   address,
+  ward,
   onLocationChange,
 }: MapPickerProps) {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
@@ -106,10 +109,11 @@ export function MapPicker({
 
   if (!apiKey) {
     return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        Add <code className="font-mono">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> to your{" "}
-        <code className="font-mono">.env</code> file to enable the map picker.
-      </div>
+      <ManualLocationFields
+        address={address}
+        ward={ward}
+        onLocationChange={onLocationChange}
+      />
     );
   }
 
@@ -194,6 +198,60 @@ export function MapPicker({
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+function ManualLocationFields({
+  address,
+  ward,
+  onLocationChange,
+}: {
+  address: string | null;
+  ward: string | null;
+  onLocationChange: (location: MapLocation) => void;
+}) {
+  const [addressValue, setAddressValue] = useState(address ?? "");
+  const [wardValue, setWardValue] = useState(ward ?? "");
+
+  useEffect(() => {
+    onLocationChange({
+      latitude: null,
+      longitude: null,
+      address: addressValue,
+      googlePlaceId: null,
+      ward: wardValue.trim() || null,
+    });
+  }, [addressValue, wardValue, onLocationChange]);
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-neutral-600">
+        Enter the issue location manually. Map pinning is unavailable without a
+        Google Maps API key.
+      </p>
+
+      <label className="block space-y-1 text-sm">
+        <span className="font-medium">Area / ward</span>
+        <input
+          type="text"
+          placeholder="e.g. Kothrud, Hadapsar"
+          value={wardValue}
+          onChange={(event) => setWardValue(event.target.value)}
+          className="w-full rounded-lg border border-neutral-300 px-3 py-2"
+        />
+      </label>
+
+      <label className="block space-y-1 text-sm">
+        <span className="font-medium">Address</span>
+        <textarea
+          placeholder="Street, landmark, or nearby reference"
+          value={addressValue}
+          onChange={(event) => setAddressValue(event.target.value)}
+          rows={3}
+          className="w-full rounded-lg border border-neutral-300 px-3 py-2"
+        />
+      </label>
     </div>
   );
 }

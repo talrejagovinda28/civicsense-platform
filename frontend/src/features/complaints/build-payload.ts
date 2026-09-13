@@ -5,11 +5,10 @@ export function buildCreateComplaintPayload(
   draft: ComplaintDraft,
 ): CreateComplaintPayload {
   if (
-    draft.latitude === null ||
-    draft.longitude === null ||
-    !draft.googlePlaceId ||
-    !draft.address ||
-    !draft.categoryId
+    !draft.address?.trim() ||
+    !draft.categoryId ||
+    (draft.googlePlaceId &&
+      (draft.latitude === null || draft.longitude === null))
   ) {
     throw new Error("Complaint draft is incomplete");
   }
@@ -20,9 +19,10 @@ export function buildCreateComplaintPayload(
     latitude: draft.latitude,
     longitude: draft.longitude,
     google_place_id: draft.googlePlaceId,
-    address: draft.address,
+    address: draft.address.trim(),
     ward: draft.ward,
     city: draft.city,
+    city_slug: draft.citySlug,
     ai_suggested_category_id: draft.aiSuggestedCategoryId,
     ai_confidence: draft.aiConfidence,
     images: draft.images.map((image) => ({

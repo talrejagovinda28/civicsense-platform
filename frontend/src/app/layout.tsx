@@ -5,8 +5,9 @@ import { Providers } from "@/features/shared/providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "CivicSense",
-  description: "Report civic issues in Pune",
+  title: "CivicSense — Civic issues map for your city",
+  description:
+    "Explore public civic issues on an interactive map. Report problems, track accountability, and connect with your municipality.",
 };
 
 export default function RootLayout({

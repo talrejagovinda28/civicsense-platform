@@ -11,6 +11,7 @@ export type ComplaintDraft = {
   address: string | null;
   ward: string | null;
   city: string;
+  citySlug: string;
   images: ComplaintImageDraft[];
   categoryId: string | null;
   categoryName: string | null;
@@ -30,13 +31,17 @@ export const COMPLAINT_WIZARD_STEPS = [
 
 export type ComplaintWizardStep = (typeof COMPLAINT_WIZARD_STEPS)[number];
 
-export const emptyComplaintDraft = (): ComplaintDraft => ({
+export const emptyComplaintDraft = (
+  cityName = "Pune",
+  citySlug = "pune",
+): ComplaintDraft => ({
   latitude: null,
   longitude: null,
   googlePlaceId: null,
   address: null,
   ward: null,
-  city: "Pune",
+  city: cityName,
+  citySlug,
   images: [],
   categoryId: null,
   categoryName: null,

@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from app.models.complaint import ComplaintStatus
 from app.schemas.category import CategoryResponse
 from app.schemas.complaint_status import StatusHistoryResponse
+from app.schemas.external_submission import ExternalSubmissionResponse
 
 
 class ComplaintImageResponse(BaseModel):
@@ -26,6 +27,10 @@ class ComplaintFeedItem(BaseModel):
     city: str
     images: list[ComplaintImageResponse]
     created_at: datetime
+    public_latitude: float | None = None
+    public_longitude: float | None = None
+    electoral_ward_id: uuid.UUID | None = None
+    category_id: uuid.UUID | None = None
 
 
 class ComplaintDetail(BaseModel):
@@ -47,6 +52,14 @@ class ComplaintDetail(BaseModel):
     ai_suggested_category_id: uuid.UUID | None = None
     ai_confidence: float | None = None
     status_history: list[StatusHistoryResponse] = Field(default_factory=list)
+    electoral_ward_id: uuid.UUID | None = None
+    department_id: uuid.UUID | None = None
+    ward_office_id: uuid.UUID | None = None
+    city_id: uuid.UUID | None = None
+    public_latitude: float | None = None
+    public_longitude: float | None = None
+    external_submission: ExternalSubmissionResponse | None = None
+    approximate_location_label: str | None = None
 
 
 class PaginatedComplaints(BaseModel):

@@ -81,12 +81,13 @@ export function validateStep(
 ): boolean {
   switch (step) {
     case "location":
-      return (
-        draft.latitude !== null &&
-        draft.longitude !== null &&
-        Boolean(draft.googlePlaceId) &&
-        Boolean(draft.address)
-      );
+      if (!draft.address?.trim()) {
+        return false;
+      }
+      if (draft.googlePlaceId) {
+        return draft.latitude !== null && draft.longitude !== null;
+      }
+      return true;
     case "photo":
       return draft.images.length >= 1;
     case "category":
@@ -112,7 +113,7 @@ export function getStepValidationMessage(
 
   switch (step) {
     case "location":
-      return "Set a location with address and map pin.";
+      return "Enter an address or pin a location on the map.";
     case "photo":
       return "Add at least one photo.";
     case "category":

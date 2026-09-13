@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 
+import { AccountabilityCard } from "@/features/accountability/accountability-card";
+import { OfficialHandoffCard } from "@/features/routing/official-handoff-card";
 import {
   apiFetch,
   ComplaintDetail,
@@ -70,7 +72,7 @@ export function ComplaintDetailView({ complaintId }: ComplaintDetailViewProps) {
   });
 
   if (complaintQuery.isLoading) {
-    return <p className="text-sm text-neutral-500">Loading complaint…</p>;
+    return <p className="text-sm text-[var(--muted)]">Loading complaint…</p>;
   }
 
   if (complaintQuery.error || !complaintQuery.data) {
@@ -86,19 +88,35 @@ export function ComplaintDetailView({ complaintId }: ComplaintDetailViewProps) {
   const canUpdateStatus = role === "officer" || role === "admin";
   const nextStatuses = getNextStatusOptions(complaint.status, role);
 
+  const mapLat = complaint.public_latitude ?? complaint.latitude ?? null;
+  const mapLng = complaint.public_longitude ?? complaint.longitude ?? null;
+  const citySlug = complaint.city.toLowerCase().replace(/\s+/g, "-");
+
   return (
-    <ComplaintDetailContent
-      complaint={complaint}
-      canUpdateStatus={canUpdateStatus}
-      nextStatuses={nextStatuses}
-      selectedStatus={selectedStatus}
-      note={note}
-      updateError={updateError}
-      isUpdating={statusMutation.isPending}
-      onStatusChange={setSelectedStatus}
-      onNoteChange={setNote}
-      onSubmitUpdate={() => statusMutation.mutate()}
-    />
+    <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
+      <ComplaintDetailContent
+        complaint={complaint}
+        canUpdateStatus={canUpdateStatus}
+        nextStatuses={nextStatuses}
+        selectedStatus={selectedStatus}
+        note={note}
+        updateError={updateError}
+        isUpdating={statusMutation.isPending}
+        onStatusChange={setSelectedStatus}
+        onNoteChange={setNote}
+        onSubmitUpdate={() => statusMutation.mutate()}
+      />
+
+      <aside className="space-y-4">
+        <AccountabilityCard
+          citySlug={citySlug}
+          latitude={mapLat}
+          longitude={mapLng}
+          categoryId={complaint.category.id}
+        />
+        <OfficialHandoffCard complaint={complaint} />
+      </aside>
+    </div>
   );
 }
 
@@ -125,14 +143,17 @@ function ComplaintDetailContent({
   onNoteChange: (value: string) => void;
   onSubmitUpdate: () => void;
 }) {
+  const locationLabel =
+    complaint.approximate_location_label ?? complaint.ward ?? complaint.city;
+
   return (
     <div className="space-y-8">
       <div>
-        <p className="text-xs uppercase tracking-wide text-neutral-500">
+        <p className="text-xs uppercase tracking-wide text-[var(--muted)]">
           {complaint.category.name} · {STATUS_LABELS[complaint.status] ?? complaint.status}
         </p>
-        <h2 className="mt-1 text-2xl font-bold">{complaint.title}</h2>
-        <p className="mt-3 text-neutral-600">{complaint.description}</p>
+        <h2 className="mt-1 text-2xl font-bold text-civic-navy">{complaint.title}</h2>
+        <p className="mt-3 text-[var(--muted)]">{complaint.description}</p>
       </div>
 
       {complaint.images.length > 0 && (
@@ -151,7 +172,7 @@ function ComplaintDetailContent({
       )}
 
       <dl className="grid gap-4 sm:grid-cols-2">
-        <DetailItem label="Area" value={complaint.ward ?? complaint.city} />
+        <DetailItem label="Area" value={locationLabel ?? "—"} />
         <DetailItem
           label="Reported"
           value={new Date(complaint.created_at).toLocaleString()}
@@ -160,20 +181,20 @@ function ComplaintDetailContent({
       </dl>
 
       <section>
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
           Status Timeline
         </h3>
-        <ol className="mt-4 space-y-4 border-l border-neutral-200 pl-4">
+        <ol className="mt-4 space-y-4 border-l border-civic pl-4">
           {(complaint.status_history ?? []).map((entry) => (
             <li key={entry.id} className="relative">
-              <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-neutral-900" />
+              <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-[var(--primary)]" />
               <p className="text-sm font-medium">
                 {STATUS_LABELS[entry.status] ?? entry.status}
               </p>
               {entry.note && (
-                <p className="mt-1 text-sm text-neutral-600">{entry.note}</p>
+                <p className="mt-1 text-sm text-[var(--muted)]">{entry.note}</p>
               )}
-              <p className="mt-1 text-xs text-neutral-500">
+              <p className="mt-1 text-xs text-[var(--muted)]">
                 {new Date(entry.created_at).toLocaleString()}
               </p>
             </li>
@@ -182,15 +203,15 @@ function ComplaintDetailContent({
       </section>
 
       {canUpdateStatus && nextStatuses.length > 0 && (
-        <section className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
-          <h3 className="font-semibold">Update Status</h3>
+        <section className="rounded-xl border border-civic bg-[var(--surface-muted)] p-4">
+          <h3 className="font-semibold text-civic-navy">Update Status</h3>
           <div className="mt-4 space-y-3">
             <label className="block text-sm font-medium">
               New status
               <select
                 value={selectedStatus}
                 onChange={(event) => onStatusChange(event.target.value)}
-                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-civic px-3 py-2 text-sm"
               >
                 <option value="">Select status…</option>
                 {nextStatuses.map((option) => (
@@ -208,7 +229,7 @@ function ComplaintDetailContent({
                 onChange={(event) => onNoteChange(event.target.value)}
                 rows={3}
                 placeholder="Add a note for the citizen…"
-                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-civic px-3 py-2 text-sm"
               />
             </label>
 
@@ -218,7 +239,7 @@ function ComplaintDetailContent({
               type="button"
               disabled={!selectedStatus || isUpdating}
               onClick={onSubmitUpdate}
-              className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
+              className="rounded-lg bg-civic-navy px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
             >
               {isUpdating ? "Updating…" : "Save Status Update"}
             </button>
@@ -232,7 +253,7 @@ function ComplaintDetailContent({
 function DetailItem({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-xs uppercase tracking-wide text-neutral-500">{label}</dt>
+      <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">{label}</dt>
       <dd className="mt-1 text-sm">{value}</dd>
     </div>
   );
@@ -242,16 +263,18 @@ export function ComplaintListItem({ complaint }: { complaint: ComplaintFeedItem 
   return (
     <Link
       href={`/complaints/${complaint.id}`}
-      className="block rounded-xl border border-neutral-200 bg-white p-5 shadow-sm transition hover:border-neutral-400"
+      className="block rounded-xl border border-civic bg-[var(--surface)] p-5 shadow-civic-sm transition hover:border-[var(--border-strong)]"
     >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-xs uppercase tracking-wide text-neutral-500">
+          <p className="text-xs uppercase tracking-wide text-[var(--muted)]">
             {complaint.category.name} · {STATUS_LABELS[complaint.status] ?? complaint.status}
           </p>
-          <h2 className="mt-1 font-semibold">{complaint.title}</h2>
-          <p className="mt-2 line-clamp-2 text-sm text-neutral-600">{complaint.description}</p>
-          <p className="mt-2 text-xs text-neutral-500">
+          <h2 className="mt-1 font-semibold text-civic-navy">{complaint.title}</h2>
+          <p className="mt-2 line-clamp-2 text-sm text-[var(--muted)]">
+            {complaint.description}
+          </p>
+          <p className="mt-2 text-xs text-[var(--muted)]">
             {complaint.ward ?? complaint.city} ·{" "}
             {new Date(complaint.created_at).toLocaleDateString()}
           </p>

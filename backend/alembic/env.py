@@ -7,12 +7,20 @@ from app.core.config import settings
 from app.db.base import Base
 from app.models import (  # noqa: F401
     Category,
+    CategoryRoutingRule,
     City,
     Complaint,
     ComplaintImage,
     ComplaintStatusHistory,
+    Department,
     ElectoralWard,
+    ExternalSubmission,
+    OfficialJurisdiction,
+    PublicOfficial,
+    RoutingChannel,
     UserProfile,
+    WardJurisdictionMapping,
+    WardOffice,
 )
 
 config = context.config

@@ -37,13 +37,14 @@ class SuggestCategoryResponse(BaseModel):
 class ComplaintCreate(BaseModel):
     description: str = Field(min_length=20, max_length=2000)
     category_id: uuid.UUID
-    latitude: float = Field(ge=-90, le=90)
-    longitude: float = Field(ge=-180, le=180)
-    google_place_id: str = Field(min_length=1, max_length=255)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    google_place_id: str | None = Field(default=None, max_length=255)
     address: str = Field(min_length=1, max_length=500)
     images: list[ComplaintImageInput] = Field(min_length=1, max_length=3)
     title: str | None = Field(default=None, min_length=5, max_length=200)
     ward: str | None = Field(default=None, max_length=100)
     city: str = Field(default="Pune", max_length=100)
+    city_slug: str = Field(default="pune", max_length=100)
     ai_suggested_category_id: uuid.UUID | None = None
     ai_confidence: float | None = Field(default=None, ge=0.0, le=1.0)

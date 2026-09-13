@@ -1,0 +1,14 @@
+{
+  "city": "pune",
+  "dataset": "PMC Electoral Wards 2025",
+  "source_page": "https://data.opencity.in/dataset/pune-wards-info/resource/2badcc86-489c-4b7e-b7dd-a273ef01b798",
+  "source_parent": "https://data.opencity.in/dataset/pune-wards-info",
+  "source_tier": "B",
+  "license": "Public Domain",
+  "credit": "Parisar",
+  "source_data_date": "2025-11-25",
+  "normalized_format": "GeoJSON",
+  "crs": "EPSG:4326",
+  "feature_count_expected": 41,
+  "notes": "Normalized for CivicSense from OpenCity KML upload. Ward number stored in properties.ward_no from qwr field."
+}

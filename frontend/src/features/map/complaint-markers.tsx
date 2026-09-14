@@ -5,6 +5,8 @@ import { useEffect } from "react";
 
 import { ComplaintFeedItem, STATUS_COLORS } from "@/lib/api";
 
+import { MAP_DEFAULT_FONTS } from "./tile-config";
+
 const SOURCE_ID = "complaints";
 const CLUSTER_LAYER_ID = "complaint-clusters";
 const CLUSTER_COUNT_LAYER_ID = "complaint-cluster-count";
@@ -104,6 +106,7 @@ export function ComplaintMapLayers({
       filter: ["has", "point_count"],
       layout: {
         "text-field": ["get", "point_count_abbreviated"],
+        "text-font": [...MAP_DEFAULT_FONTS],
         "text-size": 12,
       },
       paint: {

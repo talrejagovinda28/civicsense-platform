@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import { AppHeader } from "@/features/shared/app-header";
 import { useCity } from "@/features/cities/city-context";
@@ -12,12 +12,14 @@ import { ComplaintFeedItem, getComplaints } from "@/lib/api";
 
 import type { SelectedWard } from "@/features/map/civic-map";
 
+const EMPTY_COMPLAINTS: ComplaintFeedItem[] = [];
+
 const CivicMap = dynamic(
   () => import("@/features/map/civic-map").then((module) => module.CivicMap),
   {
     ssr: false,
     loading: () => (
-      <div className="absolute inset-0 flex items-center justify-center bg-[var(--surface-muted)]">
+      <div className="flex h-full w-full items-center justify-center bg-[var(--surface-muted)]">
         <p className="text-sm text-[var(--muted)]">Loading map…</p>
       </div>
     ),
@@ -41,27 +43,29 @@ export function HomeView() {
       }),
   });
 
-  const complaints = complaintsQuery.data?.items ?? [];
+  const complaints = complaintsQuery.data?.items ?? EMPTY_COMPLAINTS;
+
+  const handleSelectWard = useCallback((ward: SelectedWard | null) => {
+    setSelectedWard(ward);
+    if (ward) {
+      setSelectedComplaint(null);
+    }
+  }, []);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <AppHeader />
 
-      <div className="relative flex flex-1 overflow-hidden">
-        <div className="relative isolate min-h-0 flex-1 pb-16 md:pb-0">
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        <div className="relative h-full min-h-0 min-w-0 flex-1">
           <MapErrorBoundary>
             <CivicMap
               complaints={complaints}
               selectedComplaintId={selectedComplaint?.id}
               onSelectComplaint={setSelectedComplaint}
               selectedWard={selectedWard}
-              onSelectWard={(ward) => {
-                setSelectedWard(ward);
-                if (ward) {
-                  setSelectedComplaint(null);
-                }
-              }}
-              className="absolute inset-0 min-h-[320px]"
+              onSelectWard={handleSelectWard}
+              className="h-full w-full"
             />
           </MapErrorBoundary>
         </div>

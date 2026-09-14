@@ -53,6 +53,7 @@ export function isFatalMapError(message: string): boolean {
 }
 
 export function resizeMap(map: MapLibreMap) {
+  map.resize();
   requestAnimationFrame(() => {
     map.resize();
   });

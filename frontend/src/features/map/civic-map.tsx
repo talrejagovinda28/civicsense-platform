@@ -71,6 +71,16 @@ export function CivicMap({
   const mapRef = useRef<MapLibreMap | null>(null);
   const hoveredWardIdRef = useRef<string | number | null>(null);
   const selectedWardFeatureIdRef = useRef<string | number | null>(null);
+  const onSelectWardRef = useRef(onSelectWard);
+  const selectedWardRef = useRef(selectedWard);
+
+  useEffect(() => {
+    onSelectWardRef.current = onSelectWard;
+  }, [onSelectWard]);
+
+  useEffect(() => {
+    selectedWardRef.current = selectedWard;
+  }, [selectedWard]);
 
   const { selectedCity, citySlug } = useCity();
   const [mapReady, setMapReady] = useState(false);
@@ -115,40 +125,69 @@ export function CivicMap({
   );
 
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) {
+    const container = containerRef.current;
+    if (!container || mapRef.current) {
       return;
     }
 
-    try {
-      const maplibregl = getMapLibre();
-      const map = new maplibregl.Map({
-        container: containerRef.current,
-        style: createBaseMapStyle(),
-        center: [center.lng, center.lat],
-        zoom,
-        attributionControl: false,
-      });
+    let disposed = false;
+    let sizeObserver: ResizeObserver | null = null;
 
-      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-      map.on("load", () => {
-        resizeMap(map);
-        setMapReady(true);
-      });
-      map.on("error", (event) => {
-        const message = event.error?.message;
-        if (message && isFatalMapError(message)) {
-          setLoadError(message);
+    const initMap = () => {
+      if (disposed || mapRef.current || !containerRef.current) {
+        return true;
+      }
+
+      const { offsetWidth, offsetHeight } = containerRef.current;
+      if (offsetWidth < 1 || offsetHeight < 1) {
+        return false;
+      }
+
+      try {
+        const maplibregl = getMapLibre();
+        const map = new maplibregl.Map({
+          container: containerRef.current,
+          style: createBaseMapStyle(),
+          center: [center.lng, center.lat],
+          zoom,
+          attributionControl: false,
+        });
+
+        map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+        map.on("load", () => {
+          resizeMap(map);
+          setMapReady(true);
+        });
+        map.on("error", (event) => {
+          const message = event.error?.message;
+          if (message && isFatalMapError(message)) {
+            setLoadError(message);
+          }
+        });
+
+        mapRef.current = map;
+      } catch (error) {
+        setLoadError(
+          error instanceof Error ? error.message : "Failed to initialize map.",
+        );
+      }
+
+      return true;
+    };
+
+    if (!initMap()) {
+      sizeObserver = new ResizeObserver(() => {
+        if (initMap() && sizeObserver) {
+          sizeObserver.disconnect();
+          sizeObserver = null;
         }
       });
-
-      mapRef.current = map;
-    } catch (error) {
-      setLoadError(
-        error instanceof Error ? error.message : "Failed to initialize map.",
-      );
+      sizeObserver.observe(container);
     }
 
     return () => {
+      disposed = true;
+      sizeObserver?.disconnect();
       mapRef.current?.remove();
       mapRef.current = null;
       setMapReady(false);
@@ -285,6 +324,8 @@ export function CivicMap({
 
       handleWardClick = (event: MapLayerMouseEvent) => {
         const feature = event.features?.[0];
+        const onSelectWard = onSelectWardRef.current;
+        const currentSelectedWard = selectedWardRef.current;
         if (!feature?.id || !onSelectWard) {
           return;
         }
@@ -301,7 +342,7 @@ export function CivicMap({
           );
         }
 
-        const isSameWard = selectedWard?.id === ward.id;
+        const isSameWard = currentSelectedWard?.id === ward.id;
         if (isSameWard) {
           selectedWardFeatureIdRef.current = null;
           onSelectWard(null);
@@ -338,7 +379,7 @@ export function CivicMap({
       hoveredWardIdRef.current = null;
       selectedWardFeatureIdRef.current = null;
     };
-  }, [geoJsonQuery.data, mapReady, onSelectWard, selectedWard?.id, wardByFeatureId]);
+  }, [geoJsonQuery.data, mapReady, wardByFeatureId]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -395,8 +436,8 @@ export function CivicMap({
   }
 
   return (
-    <div className={`relative ${className}`}>
-      <div ref={containerRef} className="h-full w-full" aria-label="Civic map" />
+    <div className={`relative min-h-[320px] ${className}`}>
+      <div ref={containerRef} className="absolute inset-0" aria-label="Civic map" />
       <MapAttribution />
 
       {!mapReady && (

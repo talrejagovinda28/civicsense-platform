@@ -55,6 +55,55 @@ function removeComplaintLayers(map: MapLibreMap) {
   }
 }
 
+function syncComplaintLayers(
+  map: MapLibreMap,
+  complaints: ComplaintFeedItem[],
+  selectedId?: string | null,
+) {
+  const data = complaintsToGeoJson(complaints, selectedId);
+  const existing = map.getSource(SOURCE_ID) as GeoJSONSource | undefined;
+
+  if (existing) {
+    existing.setData(data);
+    return;
+  }
+
+  map.addSource(SOURCE_ID, {
+    type: "geojson",
+    data,
+    cluster: true,
+    clusterMaxZoom: 14,
+    clusterRadius: 50,
+  });
+
+  map.addLayer({
+    id: CLUSTER_LAYER_ID,
+    type: "circle",
+    source: SOURCE_ID,
+    filter: ["has", "point_count"],
+    paint: {
+      "circle-color": "#2563eb",
+      "circle-radius": ["step", ["get", "point_count"], 16, 10, 20, 25, 24],
+      "circle-opacity": 0.85,
+      "circle-stroke-width": 2,
+      "circle-stroke-color": "#ffffff",
+    },
+  });
+
+  map.addLayer({
+    id: POINT_LAYER_ID,
+    type: "circle",
+    source: SOURCE_ID,
+    filter: ["!", ["has", "point_count"]],
+    paint: {
+      "circle-color": ["case", ["get", "selected"], "#1e293b", ["get", "color"]],
+      "circle-radius": ["case", ["get", "selected"], 10, 8],
+      "circle-stroke-width": 2,
+      "circle-stroke-color": "#ffffff",
+    },
+  });
+}
+
 export function ComplaintMapLayers({
   map,
   complaints,
@@ -62,66 +111,38 @@ export function ComplaintMapLayers({
   onSelect,
 }: ComplaintMapLayersProps) {
   useEffect(() => {
-    if (!map || !map.isStyleLoaded()) {
+    if (!map) {
       return;
     }
 
-    try {
-      const data = complaintsToGeoJson(complaints, selectedId);
-      const existing = map.getSource(SOURCE_ID) as GeoJSONSource | undefined;
-
-      if (existing) {
-        existing.setData(data);
-        return;
+    const applyLayers = () => {
+      try {
+        syncComplaintLayers(map, complaints, selectedId);
+      } catch (error) {
+        console.error("Failed to add complaint map layers:", error);
       }
+    };
 
-      map.addSource(SOURCE_ID, {
-        type: "geojson",
-        data,
-        cluster: true,
-        clusterMaxZoom: 14,
-        clusterRadius: 50,
-      });
+    if (map.isStyleLoaded()) {
+      applyLayers();
+    } else {
+      map.once("load", applyLayers);
+    }
 
-      map.addLayer({
-        id: CLUSTER_LAYER_ID,
-        type: "circle",
-        source: SOURCE_ID,
-        filter: ["has", "point_count"],
-        paint: {
-          "circle-color": "#2563eb",
-          "circle-radius": ["step", ["get", "point_count"], 16, 10, 20, 25, 24],
-          "circle-opacity": 0.85,
-          "circle-stroke-width": 2,
-          "circle-stroke-color": "#ffffff",
-        },
-      });
+    return () => {
+      map.off("load", applyLayers);
+    };
+  }, [map, complaints, selectedId]);
 
-      map.addLayer({
-        id: POINT_LAYER_ID,
-        type: "circle",
-        source: SOURCE_ID,
-        filter: ["!", ["has", "point_count"]],
-        paint: {
-          "circle-color": [
-            "case",
-            ["get", "selected"],
-            "#1e293b",
-            ["get", "color"],
-          ],
-          "circle-radius": ["case", ["get", "selected"], 10, 8],
-          "circle-stroke-width": 2,
-          "circle-stroke-color": "#ffffff",
-        },
-      });
-    } catch (error) {
-      console.error("Failed to add complaint map layers:", error);
+  useEffect(() => {
+    if (!map) {
+      return;
     }
 
     return () => {
       removeComplaintLayers(map);
     };
-  }, [map, complaints, selectedId]);
+  }, [map]);
 
   useEffect(() => {
     if (!map || !onSelect) {

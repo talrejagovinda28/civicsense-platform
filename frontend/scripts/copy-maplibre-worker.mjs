@@ -16,4 +16,4 @@ const target = join(targetDir, "maplibre-gl-csp-worker.js");
 
 mkdirSync(targetDir, { recursive: true });
 copyFileSync(source, target);
-console.log("Copied MapLibre worker to public/maplibre/");
+console.log("Copied MapLibre CSP worker to public/maplibre/");

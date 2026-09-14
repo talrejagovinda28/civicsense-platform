@@ -1,18 +1,35 @@
 "use client";
 
-import maplibregl from "maplibre-gl";
+import type { Map as MapLibreMap } from "maplibre-gl";
+import maplibreglImport from "maplibre-gl";
 
 let workerConfigured = false;
 
-/** Self-hosted worker shipped in /public/maplibre (see scripts/copy-maplibre-worker.mjs). */
-const MAPLIBRE_WORKER_URL = "/maplibre/maplibre-gl-csp-worker.js";
+/** Self-hosted CSP worker (see scripts/copy-maplibre-worker.mjs). */
+const MAPLIBRE_WORKER_PATH = "/maplibre/maplibre-gl-csp-worker.js";
+
+type MapLibreModule = typeof maplibreglImport & {
+  default?: typeof maplibreglImport;
+};
 
 /**
- * MapLibre requires a web worker. Use the app-hosted worker for reliable Vercel production.
+ * Resolve the MapLibre namespace from the CSP bundle (webpack alias in next.config.ts).
+ */
+function resolveMapLibre() {
+  const mod = maplibreglImport as MapLibreModule;
+  return mod.default ?? mod;
+}
+
+/**
+ * MapLibre requires a web worker. The CSP main + CSP worker builds must be used as a pair.
  */
 export function getMapLibre() {
+  const maplibregl = resolveMapLibre();
+
   if (typeof window !== "undefined" && !workerConfigured) {
-    maplibregl.setWorkerUrl(MAPLIBRE_WORKER_URL);
+    maplibregl.setWorkerUrl(
+      new URL(MAPLIBRE_WORKER_PATH, window.location.origin).href,
+    );
     workerConfigured = true;
   }
 
@@ -35,7 +52,7 @@ export function isFatalMapError(message: string): boolean {
   return true;
 }
 
-export function resizeMap(map: maplibregl.Map) {
+export function resizeMap(map: MapLibreMap) {
   requestAnimationFrame(() => {
     map.resize();
   });

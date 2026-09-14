@@ -3,6 +3,8 @@
 import dynamic from "next/dynamic";
 import { useCallback } from "react";
 
+import { MapErrorBoundary } from "@/features/map/map-error-boundary";
+
 import { useComplaintWizard } from "../wizard-context";
 
 const MapPicker = dynamic(
@@ -65,13 +67,22 @@ export function LocationStep() {
         </ul>
       </aside>
 
-      <MapPicker
-      latitude={draft.latitude}
-      longitude={draft.longitude}
-      address={draft.address}
-      ward={draft.ward}
-      onLocationChange={handleLocationChange}
-    />
+      <MapErrorBoundary
+        fallback={
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            The location map could not load. You can still enter the address and ward
+            manually below once the map recovers, or try refreshing the page.
+          </div>
+        }
+      >
+        <MapPicker
+          latitude={draft.latitude}
+          longitude={draft.longitude}
+          address={draft.address}
+          ward={draft.ward}
+          onLocationChange={handleLocationChange}
+        />
+      </MapErrorBoundary>
     </div>
   );
 }

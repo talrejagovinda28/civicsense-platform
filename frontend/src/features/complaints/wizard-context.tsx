@@ -31,7 +31,7 @@ export function ComplaintWizardProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const [draft, setDraft] = useState<ComplaintDraft>(emptyComplaintDraft);
+  const [draft, setDraft] = useState<ComplaintDraft>(() => emptyComplaintDraft());
 
   const updateDraft = useCallback((patch: Partial<ComplaintDraft>) => {
     setDraft((current) => ({ ...current, ...patch }));

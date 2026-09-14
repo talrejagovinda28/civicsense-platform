@@ -10,6 +10,8 @@ type IssuePanelProps = {
   isLoading?: boolean;
   selectedId?: string | null;
   onSelect?: (complaint: ComplaintFeedItem) => void;
+  selectedWard?: { wardNo: number; name: string } | null;
+  onClearWard?: () => void;
 };
 
 const STATUS_FILTERS = [
@@ -107,6 +109,8 @@ export function IssuePanel({
   isLoading,
   selectedId,
   onSelect,
+  selectedWard,
+  onClearWard,
 }: IssuePanelProps) {
   const [statusFilter, setStatusFilter] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -126,6 +130,15 @@ export function IssuePanel({
           <span className="text-xs text-[var(--muted)]">{filtered.length} shown</span>
         </div>
         <div className="mt-3 flex flex-wrap gap-1.5">
+          {selectedWard && (
+            <button
+              type="button"
+              onClick={onClearWard}
+              className="rounded-full bg-[var(--primary-muted)] px-2.5 py-1 text-xs font-medium text-civic-navy"
+            >
+              Ward {selectedWard.wardNo} ×
+            </button>
+          )}
           {STATUS_FILTERS.map((filter) => (
             <button
               key={filter.value}

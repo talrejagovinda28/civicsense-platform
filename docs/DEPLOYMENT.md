@@ -11,7 +11,7 @@ This guide covers deploying the CivicSense MVP after Sprint 4.
 | Database | [Supabase](https://supabase.com) | PostgreSQL only (not Supabase Auth) |
 | Auth | [Clerk](https://clerk.com) | Roles in `public_metadata.role` |
 | Images | [Cloudinary](https://cloudinary.com) | Signed uploads via backend |
-| Maps | Google Cloud | Maps JavaScript API + Places API |
+| Maps | OpenStreetMap + MapLibre GL JS | No API key required for base tiles |
 
 ## Pre-deploy checklist
 
@@ -22,8 +22,7 @@ This guide covers deploying the CivicSense MVP after Sprint 4.
    ```
 2. Create a **production Clerk application** (or use the same test app for staging).
 3. Create a **Cloudinary folder** (e.g. `civicsense/complaints-prod`).
-4. Restrict **Google Maps API key** to your production domain.
-5. Set at least one Clerk user to `public_metadata.role = "admin"`.
+4. Set at least one Clerk user to `public_metadata.role = "admin"`.
 
 ## Environment variables
 
@@ -95,5 +94,5 @@ Run migrations against your Supabase DB before first use.
 
 - Never commit `.env` or secrets.
 - Use separate Supabase/Clerk/Cloudinary projects for prod vs dev.
-- Restrict Google Maps and Cloudinary keys by domain/IP where possible.
+- Restrict Cloudinary keys by domain/IP where possible.
 - Keep `CORS_ORIGINS` limited to your frontend URL(s).

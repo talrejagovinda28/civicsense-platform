@@ -234,6 +234,10 @@ export async function getCity(slug: string): Promise<CityResponse> {
   return apiFetch<CityResponse>(`/api/v1/cities/${slug}`, null);
 }
 
+export async function getCityWards(slug: string): Promise<ElectoralWardSummary[]> {
+  return apiFetch<ElectoralWardSummary[]>(`/api/v1/cities/${slug}/wards`, null);
+}
+
 export type WardGeoJson = {
   type: "FeatureCollection";
   features: object[];

@@ -81,13 +81,7 @@ export function validateStep(
 ): boolean {
   switch (step) {
     case "location":
-      if (!draft.address?.trim()) {
-        return false;
-      }
-      if (draft.googlePlaceId) {
-        return draft.latitude !== null && draft.longitude !== null;
-      }
-      return true;
+      return Boolean(draft.address?.trim());
     case "photo":
       return draft.images.length >= 1;
     case "category":

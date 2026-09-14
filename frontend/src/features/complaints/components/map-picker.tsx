@@ -1,10 +1,14 @@
 "use client";
 
-import { Autocomplete, GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api";
+import maplibregl, { type Map as MapLibreMap, type Marker } from "maplibre-gl";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const PUNE_CENTER = { lat: 18.5204, lng: 73.8567 };
-const MAP_LIBRARIES: ("places")[] = ["places"];
+import { MapAttribution } from "@/features/map/map-attribution";
+import {
+  createBaseMapStyle,
+  DEFAULT_PUNE_CENTER,
+  DEFAULT_PUNE_ZOOM,
+} from "@/features/map/tile-config";
 
 export type MapLocation = {
   latitude: number | null;
@@ -22,6 +26,15 @@ type MapPickerProps = {
   onLocationChange: (location: MapLocation) => void;
 };
 
+/**
+ * Optional reverse geocoder hook point for a future provider.
+ * Returns null today so address stays manual unless a geocoder is plugged in.
+ */
+export type ReverseGeocoder = (
+  latitude: number,
+  longitude: number,
+) => Promise<{ address: string; placeId?: string | null } | null>;
+
 export function MapPicker({
   latitude,
   longitude,
@@ -29,207 +42,162 @@ export function MapPicker({
   ward,
   onLocationChange,
 }: MapPickerProps) {
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
-  const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
-  const [searchValue, setSearchValue] = useState(address ?? "");
-  const [geocoding, setGeocoding] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<MapLibreMap | null>(null);
+  const markerRef = useRef<Marker | null>(null);
+
+  const [addressValue, setAddressValue] = useState(address ?? "");
+  const [wardValue, setWardValue] = useState(ward ?? "");
+  const [mapReady, setMapReady] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (address) {
-      setSearchValue(address);
+    if (address !== null) {
+      setAddressValue(address);
     }
   }, [address]);
 
-  const { isLoaded, loadError } = useJsApiLoader({
-    googleMapsApiKey: apiKey,
-    libraries: MAP_LIBRARIES,
-  });
+  useEffect(() => {
+    if (ward !== null) {
+      setWardValue(ward);
+    }
+  }, [ward]);
 
-  const reverseGeocode = useCallback(
-    (lat: number, lng: number) => {
-      if (!window.google) {
+  const emitLocation = useCallback(
+    (next: {
+      latitude: number | null;
+      longitude: number | null;
+      address?: string;
+      ward?: string | null;
+    }) => {
+      onLocationChange({
+        latitude: next.latitude,
+        longitude: next.longitude,
+        address: next.address ?? addressValue,
+        googlePlaceId: null,
+        ward: next.ward ?? (wardValue.trim() || null),
+      });
+    },
+    [addressValue, onLocationChange, wardValue],
+  );
+
+  const setMarkerAt = useCallback(
+    (lng: number, lat: number) => {
+      const map = mapRef.current;
+      if (!map) {
         return;
       }
 
-      setGeocoding(true);
-      setError(null);
+      if (!markerRef.current) {
+        markerRef.current = new maplibregl.Marker({ draggable: true, color: "#2563eb" })
+          .setLngLat([lng, lat])
+          .addTo(map);
 
-      const geocoder = new google.maps.Geocoder();
-      geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-        setGeocoding(false);
-
-        if (status !== "OK" || !results?.[0]?.place_id) {
-          setError("Could not resolve this location. Try searching for an address.");
-          return;
-        }
-
-        onLocationChange({
-          latitude: lat,
-          longitude: lng,
-          address: results[0].formatted_address,
-          googlePlaceId: results[0].place_id,
+        markerRef.current.on("dragend", () => {
+          const position = markerRef.current?.getLngLat();
+          if (!position) {
+            return;
+          }
+          emitLocation({
+            latitude: position.lat,
+            longitude: position.lng,
+          });
         });
-      });
+      } else {
+        markerRef.current.setLngLat([lng, lat]);
+      }
+
+      emitLocation({ latitude: lat, longitude: lng });
     },
-    [onLocationChange],
+    [emitLocation],
   );
 
-  const handlePlaceChanged = () => {
-    const place = autocompleteRef.current?.getPlace();
-    const location = place?.geometry?.location;
-
-    if (!location || !place?.place_id || !place.formatted_address) {
-      setError("Select a place from the suggestions list.");
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) {
       return;
     }
 
-    setError(null);
-    onLocationChange({
-      latitude: location.lat(),
-      longitude: location.lng(),
-      address: place.formatted_address,
-      googlePlaceId: place.place_id,
+    try {
+      const initialCenter =
+        latitude !== null && longitude !== null
+          ? ([longitude, latitude] as [number, number])
+          : ([DEFAULT_PUNE_CENTER.lng, DEFAULT_PUNE_CENTER.lat] as [number, number]);
+
+      const map = new maplibregl.Map({
+        container: containerRef.current,
+        style: createBaseMapStyle(),
+        center: initialCenter,
+        zoom: latitude !== null && longitude !== null ? 16 : DEFAULT_PUNE_ZOOM,
+        attributionControl: false,
+      });
+
+      map.on("load", () => {
+        setMapReady(true);
+        if (latitude !== null && longitude !== null) {
+          setMarkerAt(longitude, latitude);
+        }
+      });
+
+      map.on("click", (event) => {
+        setMarkerAt(event.lngLat.lng, event.lngLat.lat);
+      });
+
+      mapRef.current = map;
+    } catch (error) {
+      setLoadError(
+        error instanceof Error ? error.message : "Failed to initialize map.",
+      );
+    }
+
+    return () => {
+      markerRef.current?.remove();
+      markerRef.current = null;
+      mapRef.current?.remove();
+      mapRef.current = null;
+      setMapReady(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- single map mount
+  }, []);
+
+  useEffect(() => {
+    if (!mapReady || latitude === null || longitude === null) {
+      return;
+    }
+    setMarkerAt(longitude, latitude);
+  }, [latitude, longitude, mapReady, setMarkerAt]);
+
+  useEffect(() => {
+    emitLocation({
+      latitude,
+      longitude,
+      address: addressValue,
+      ward: wardValue.trim() || null,
     });
-  };
-
-  const handleMapClick = (event: google.maps.MapMouseEvent) => {
-    if (!event.latLng) {
-      return;
-    }
-    reverseGeocode(event.latLng.lat(), event.latLng.lng());
-  };
-
-  const handleMarkerDragEnd = (event: google.maps.MapMouseEvent) => {
-    if (!event.latLng) {
-      return;
-    }
-    reverseGeocode(event.latLng.lat(), event.latLng.lng());
-  };
-
-  if (!apiKey) {
-    return (
-      <ManualLocationFields
-        address={address}
-        ward={ward}
-        onLocationChange={onLocationChange}
-      />
-    );
-  }
+  }, [addressValue, wardValue, latitude, longitude, emitLocation]);
 
   if (loadError) {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-        Failed to load Google Maps. Check your API key and enabled APIs (Maps
-        JavaScript API, Places API).
+        Failed to load map: {loadError}
       </div>
     );
   }
-
-  if (!isLoaded) {
-    return (
-      <div className="flex h-80 items-center justify-center rounded-lg border border-neutral-200 bg-neutral-50 text-sm text-neutral-500">
-        Loading map…
-      </div>
-    );
-  }
-
-  const markerPosition =
-    latitude !== null && longitude !== null
-      ? { lat: latitude, lng: longitude }
-      : null;
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-neutral-600">
-        Search for a place or tap the map to drop a pin on the issue location.
+        Tap the map to drop a pin on the issue location, then enter the address below.
       </p>
 
-      <Autocomplete
-        onLoad={(autocomplete) => {
-          autocompleteRef.current = autocomplete;
-        }}
-        onPlaceChanged={handlePlaceChanged}
-        options={{
-          componentRestrictions: { country: "in" },
-          fields: ["place_id", "formatted_address", "geometry"],
-        }}
-      >
-        <input
-          type="text"
-          placeholder="Search address in Pune…"
-          value={searchValue}
-          onChange={(event) => setSearchValue(event.target.value)}
-          className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-        />
-      </Autocomplete>
-
-      <GoogleMap
-        mapContainerClassName="h-80 w-full rounded-lg border border-neutral-200"
-        center={markerPosition ?? PUNE_CENTER}
-        zoom={markerPosition ? 16 : 12}
-        onClick={handleMapClick}
-        options={{
-          streetViewControl: false,
-          mapTypeControl: false,
-          fullscreenControl: false,
-        }}
-      >
-        {markerPosition && (
-          <Marker
-            position={markerPosition}
-            draggable
-            onDragEnd={handleMarkerDragEnd}
-          />
+      <div className="relative h-80 overflow-hidden rounded-lg border border-neutral-200">
+        <div ref={containerRef} className="h-full w-full" aria-label="Location picker map" />
+        <MapAttribution />
+        {!mapReady && (
+          <div className="absolute inset-0 flex items-center justify-center bg-neutral-50 text-sm text-neutral-500">
+            Loading map…
+          </div>
         )}
-      </GoogleMap>
-
-      {geocoding && (
-        <p className="text-sm text-neutral-500">Resolving address…</p>
-      )}
-
-      {error && <p className="text-sm text-red-600">{error}</p>}
-
-      {address && latitude !== null && longitude !== null && (
-        <div className="rounded-lg bg-neutral-50 px-4 py-3 text-sm">
-          <p className="font-medium">{address}</p>
-          <p className="mt-1 text-xs text-neutral-500">
-            {latitude.toFixed(6)}, {longitude.toFixed(6)}
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ManualLocationFields({
-  address,
-  ward,
-  onLocationChange,
-}: {
-  address: string | null;
-  ward: string | null;
-  onLocationChange: (location: MapLocation) => void;
-}) {
-  const [addressValue, setAddressValue] = useState(address ?? "");
-  const [wardValue, setWardValue] = useState(ward ?? "");
-
-  useEffect(() => {
-    onLocationChange({
-      latitude: null,
-      longitude: null,
-      address: addressValue,
-      googlePlaceId: null,
-      ward: wardValue.trim() || null,
-    });
-  }, [addressValue, wardValue, onLocationChange]);
-
-  return (
-    <div className="space-y-4">
-      <p className="text-sm text-neutral-600">
-        Enter the issue location manually. Map pinning is unavailable without a
-        Google Maps API key.
-      </p>
+      </div>
 
       <label className="block space-y-1 text-sm">
         <span className="font-medium">Area / ward</span>
@@ -252,6 +220,15 @@ function ManualLocationFields({
           className="w-full rounded-lg border border-neutral-300 px-3 py-2"
         />
       </label>
+
+      {latitude !== null && longitude !== null && (
+        <div className="rounded-lg bg-neutral-50 px-4 py-3 text-sm">
+          <p className="font-medium">{addressValue || "Address not entered yet"}</p>
+          <p className="mt-1 text-xs text-neutral-500">
+            {latitude.toFixed(6)}, {longitude.toFixed(6)}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

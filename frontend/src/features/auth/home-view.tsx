@@ -5,7 +5,7 @@ import { useState } from "react";
 
 import { AppHeader } from "@/features/shared/app-header";
 import { useCity } from "@/features/cities/city-context";
-import { CivicMap } from "@/features/map/civic-map";
+import { CivicMap, SelectedWard } from "@/features/map/civic-map";
 import { IssuePanel } from "@/features/map/issue-panel";
 import { ComplaintFeedItem, getComplaints } from "@/lib/api";
 
@@ -14,10 +14,16 @@ export function HomeView() {
   const [selectedComplaint, setSelectedComplaint] = useState<ComplaintFeedItem | null>(
     null,
   );
+  const [selectedWard, setSelectedWard] = useState<SelectedWard | null>(null);
 
   const complaintsQuery = useQuery({
-    queryKey: ["complaints", citySlug],
-    queryFn: () => getComplaints({ city: citySlug, limit: 100 }),
+    queryKey: ["complaints", citySlug, selectedWard?.id ?? "all"],
+    queryFn: () =>
+      getComplaints({
+        city: citySlug,
+        electoral_ward_id: selectedWard?.id,
+        limit: 100,
+      }),
   });
 
   const complaints = complaintsQuery.data?.items ?? [];
@@ -32,6 +38,13 @@ export function HomeView() {
             complaints={complaints}
             selectedComplaintId={selectedComplaint?.id}
             onSelectComplaint={setSelectedComplaint}
+            selectedWard={selectedWard}
+            onSelectWard={(ward) => {
+              setSelectedWard(ward);
+              if (ward) {
+                setSelectedComplaint(null);
+              }
+            }}
             className="absolute inset-0"
           />
         </div>
@@ -41,6 +54,8 @@ export function HomeView() {
           isLoading={complaintsQuery.isLoading}
           selectedId={selectedComplaint?.id}
           onSelect={setSelectedComplaint}
+          selectedWard={selectedWard}
+          onClearWard={() => setSelectedWard(null)}
         />
       </div>
     </div>

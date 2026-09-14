@@ -1,39 +1,88 @@
 "use client";
 
-import { GoogleMap, useJsApiLoader } from "@react-google-maps/api";
+import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useCity } from "@/features/cities/city-context";
-import { ComplaintFeedItem, getWardGeoJson } from "@/lib/api";
+import {
+  ComplaintFeedItem,
+  getCityWards,
+  getWardGeoJson,
+} from "@/lib/api";
 
-import { ComplaintMarkers } from "./complaint-markers";
+import { ComplaintMapLayers } from "./complaint-markers";
+import { MapAttribution } from "./map-attribution";
+import {
+  createBaseMapStyle,
+  DEFAULT_PUNE_CENTER,
+  DEFAULT_PUNE_ZOOM,
+} from "./tile-config";
+
+export type SelectedWard = {
+  id: string;
+  wardNo: number;
+  name: string;
+};
 
 type CivicMapProps = {
   complaints: ComplaintFeedItem[];
   selectedComplaintId?: string | null;
   onSelectComplaint?: (complaint: ComplaintFeedItem) => void;
+  selectedWard?: SelectedWard | null;
+  onSelectWard?: (ward: SelectedWard | null) => void;
   className?: string;
 };
 
-const MAP_LIBRARIES: ("places")[] = ["places"];
+const COMPLAINT_LAYER_IDS = [
+  "complaint-points",
+  "complaint-cluster-count",
+  "complaint-clusters",
+] as const;
+
+function moveComplaintLayersToTop(map: MapLibreMap) {
+  for (const layerId of COMPLAINT_LAYER_IDS) {
+    if (map.getLayer(layerId)) {
+      map.moveLayer(layerId);
+    }
+  }
+}
+const WARD_SOURCE_ID = "electoral-wards";
+const WARD_FILL_LAYER_ID = "electoral-wards-fill";
+const WARD_LINE_LAYER_ID = "electoral-wards-line";
+
+function removeWardLayers(map: MapLibreMap) {
+  for (const layerId of [WARD_FILL_LAYER_ID, WARD_LINE_LAYER_ID]) {
+    if (map.getLayer(layerId)) {
+      map.removeLayer(layerId);
+    }
+  }
+  if (map.getSource(WARD_SOURCE_ID)) {
+    map.removeSource(WARD_SOURCE_ID);
+  }
+}
 
 export function CivicMap({
   complaints,
   selectedComplaintId,
   onSelectComplaint,
+  selectedWard,
+  onSelectWard,
   className = "h-full w-full",
 }: CivicMapProps) {
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<MapLibreMap | null>(null);
+  const hoveredWardIdRef = useRef<string | number | null>(null);
+  const selectedWardFeatureIdRef = useRef<string | number | null>(null);
+
   const { selectedCity, citySlug, isReportingEnabled } = useCity();
-  const [map, setMap] = useState<google.maps.Map | null>(null);
-  const dataLayerRef = useRef<google.maps.Data | null>(null);
+  const [mapReady, setMapReady] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const center = selectedCity
     ? { lat: selectedCity.center_lat, lng: selectedCity.center_lng }
-    : { lat: 18.5204, lng: 73.8567 };
-
-  const zoom = selectedCity?.default_zoom ?? 12;
+    : DEFAULT_PUNE_CENTER;
+  const zoom = selectedCity?.default_zoom ?? DEFAULT_PUNE_ZOOM;
   const isPreview = selectedCity?.status === "preview" || !isReportingEnabled;
 
   const geoJsonQuery = useQuery({
@@ -43,97 +92,306 @@ export function CivicMap({
     staleTime: 60 * 60 * 1000,
   });
 
-  const { isLoaded, loadError } = useJsApiLoader({
-    googleMapsApiKey: apiKey,
-    libraries: MAP_LIBRARIES,
+  const wardsQuery = useQuery({
+    queryKey: ["city-wards", citySlug],
+    queryFn: () => getCityWards(citySlug),
+    enabled: Boolean(selectedCity?.supports_ward_map),
+    staleTime: 60 * 60 * 1000,
   });
 
-  const onLoad = useCallback((loadedMap: google.maps.Map) => {
-    setMap(loadedMap);
-  }, []);
-
-  const onUnmount = useCallback(() => {
-    dataLayerRef.current?.setMap(null);
-    dataLayerRef.current = null;
-    setMap(null);
-  }, []);
+  const wardByFeatureId = useCallback(
+    (featureId: string | number): SelectedWard | null => {
+      const wards = wardsQuery.data ?? [];
+      const featureKey = String(featureId);
+      const wardNoMatch = featureKey.match(/(\d+)$/);
+      const wardNo = wardNoMatch ? Number(wardNoMatch[1]) : null;
+      if (wardNo === null) {
+        return null;
+      }
+      const ward = wards.find((item) => item.ward_no === wardNo);
+      if (!ward) {
+        return null;
+      }
+      return { id: ward.id, wardNo: ward.ward_no, name: ward.name };
+    },
+    [wardsQuery.data],
+  );
 
   useEffect(() => {
-    if (!map || !geoJsonQuery.data) {
+    if (!containerRef.current || mapRef.current) {
       return;
     }
 
-    dataLayerRef.current?.setMap(null);
+    try {
+      const map = new maplibregl.Map({
+        container: containerRef.current,
+        style: createBaseMapStyle(),
+        center: [center.lng, center.lat],
+        zoom,
+        attributionControl: false,
+      });
 
-    const dataLayer = new google.maps.Data({ map });
-    dataLayer.addGeoJson(geoJsonQuery.data);
-    dataLayer.setStyle({
-      fillColor: "#2563eb",
-      fillOpacity: 0.06,
-      strokeColor: "#2563eb",
-      strokeWeight: 1,
-      strokeOpacity: 0.45,
-    });
-    dataLayerRef.current = dataLayer;
+      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+      map.on("load", () => {
+        setMapReady(true);
+      });
+      map.on("error", (event) => {
+        if (event.error?.message) {
+          setLoadError(event.error.message);
+        }
+      });
+
+      mapRef.current = map;
+    } catch (error) {
+      setLoadError(
+        error instanceof Error ? error.message : "Failed to initialize map.",
+      );
+    }
 
     return () => {
-      dataLayer.setMap(null);
+      mapRef.current?.remove();
+      mapRef.current = null;
+      setMapReady(false);
     };
-  }, [map, geoJsonQuery.data]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- map instance is created once per mount
+  }, []);
 
-  if (!apiKey) {
-    return (
-      <div className={`flex items-center justify-center bg-[var(--surface-muted)] ${className}`}>
-        <div className="max-w-sm px-6 text-center">
-          <p className="font-medium text-civic-navy">Map unavailable</p>
-          <p className="mt-2 text-sm text-[var(--muted)]">
-            Set <code className="text-xs">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> to enable
-            the civic map. Complaints are still listed in the panel.
-          </p>
-        </div>
-      </div>
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) {
+      return;
+    }
+
+    map.easeTo({
+      center: [center.lng, center.lat],
+      zoom,
+      duration: 500,
+    });
+  }, [center.lat, center.lng, zoom, mapReady]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !geoJsonQuery.data) {
+      return;
+    }
+
+    removeWardLayers(map);
+
+    map.addSource(WARD_SOURCE_ID, {
+      type: "geojson",
+      data: geoJsonQuery.data as GeoJSON.FeatureCollection,
+      generateId: true,
+      promoteId: "geometry_feature_id",
+    });
+
+    map.addLayer({
+      id: WARD_FILL_LAYER_ID,
+      type: "fill",
+      source: WARD_SOURCE_ID,
+      paint: {
+        "fill-color": [
+          "case",
+          ["boolean", ["feature-state", "selected"], false],
+          "#1d4ed8",
+          ["boolean", ["feature-state", "hover"], false],
+          "#3b82f6",
+          "#2563eb",
+        ],
+        "fill-opacity": [
+          "case",
+          ["boolean", ["feature-state", "selected"], false],
+          0.22,
+          ["boolean", ["feature-state", "hover"], false],
+          0.14,
+          0.06,
+        ],
+      },
+    });
+
+    map.addLayer({
+      id: WARD_LINE_LAYER_ID,
+      type: "line",
+      source: WARD_SOURCE_ID,
+      paint: {
+        "line-color": [
+          "case",
+          ["boolean", ["feature-state", "selected"], false],
+          "#1e40af",
+          ["boolean", ["feature-state", "hover"], false],
+          "#2563eb",
+          "#2563eb",
+        ],
+        "line-width": [
+          "case",
+          ["boolean", ["feature-state", "selected"], false],
+          2,
+          ["boolean", ["feature-state", "hover"], false],
+          1.5,
+          1,
+        ],
+        "line-opacity": 0.55,
+      },
+    });
+
+    const clearHover = () => {
+      if (hoveredWardIdRef.current !== null) {
+        map.setFeatureState(
+          { source: WARD_SOURCE_ID, id: hoveredWardIdRef.current },
+          { hover: false },
+        );
+        hoveredWardIdRef.current = null;
+      }
+    };
+
+    const handleMouseMove = (event: maplibregl.MapLayerMouseEvent) => {
+      const feature = event.features?.[0];
+      if (!feature?.id) {
+        clearHover();
+        return;
+      }
+
+      if (hoveredWardIdRef.current !== feature.id) {
+        clearHover();
+        hoveredWardIdRef.current = feature.id;
+        map.setFeatureState({ source: WARD_SOURCE_ID, id: feature.id }, { hover: true });
+      }
+    };
+
+    const handleMouseLeave = () => {
+      clearHover();
+      map.getCanvas().style.cursor = "";
+    };
+
+    const handleWardClick = (event: maplibregl.MapLayerMouseEvent) => {
+      const feature = event.features?.[0];
+      if (!feature?.id || !onSelectWard) {
+        return;
+      }
+
+      const ward = wardByFeatureId(feature.id);
+      if (!ward) {
+        return;
+      }
+
+      if (selectedWardFeatureIdRef.current !== null) {
+        map.setFeatureState(
+          { source: WARD_SOURCE_ID, id: selectedWardFeatureIdRef.current },
+          { selected: false },
+        );
+      }
+
+      const isSameWard = selectedWard?.id === ward.id;
+      if (isSameWard) {
+        selectedWardFeatureIdRef.current = null;
+        onSelectWard(null);
+        return;
+      }
+
+      selectedWardFeatureIdRef.current = feature.id;
+      map.setFeatureState({ source: WARD_SOURCE_ID, id: feature.id }, { selected: true });
+      onSelectWard(ward);
+    };
+
+    map.on("mousemove", WARD_FILL_LAYER_ID, handleMouseMove);
+    map.on("mouseleave", WARD_FILL_LAYER_ID, handleMouseLeave);
+    map.on("mouseenter", WARD_FILL_LAYER_ID, () => {
+      map.getCanvas().style.cursor = "pointer";
+    });
+    map.on("click", WARD_FILL_LAYER_ID, handleWardClick);
+    moveComplaintLayersToTop(map);
+
+    return () => {
+      map.off("mousemove", WARD_FILL_LAYER_ID, handleMouseMove);
+      map.off("mouseleave", WARD_FILL_LAYER_ID, handleMouseLeave);
+      map.off("click", WARD_FILL_LAYER_ID, handleWardClick);
+      removeWardLayers(map);
+      hoveredWardIdRef.current = null;
+      selectedWardFeatureIdRef.current = null;
+    };
+  }, [geoJsonQuery.data, mapReady, onSelectWard, selectedWard?.id, wardByFeatureId]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !selectedWard) {
+      return;
+    }
+
+    const feature = (geoJsonQuery.data as GeoJSON.FeatureCollection | undefined)?.features.find(
+      (item) => Number(item.properties?.ward_no) === selectedWard.wardNo,
     );
-  }
+    if (!feature?.properties?.geometry_feature_id) {
+      return;
+    }
+
+    const featureId = feature.properties.geometry_feature_id as string;
+    if (selectedWardFeatureIdRef.current !== null) {
+      map.setFeatureState(
+        { source: WARD_SOURCE_ID, id: selectedWardFeatureIdRef.current },
+        { selected: false },
+      );
+    }
+    selectedWardFeatureIdRef.current = featureId;
+    map.setFeatureState({ source: WARD_SOURCE_ID, id: featureId }, { selected: true });
+  }, [geoJsonQuery.data, mapReady, selectedWard]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !selectedComplaintId) {
+      return;
+    }
+
+    const complaint = complaints.find((item) => item.id === selectedComplaintId);
+    if (
+      !complaint ||
+      complaint.public_latitude === null ||
+      complaint.public_longitude === null
+    ) {
+      return;
+    }
+
+    map.easeTo({
+      center: [complaint.public_longitude, complaint.public_latitude],
+      zoom: Math.max(map.getZoom(), 14),
+      duration: 600,
+    });
+  }, [complaints, mapReady, selectedComplaintId]);
 
   if (loadError) {
     return (
       <div className={`flex items-center justify-center bg-red-50 ${className}`}>
-        <p className="px-6 text-sm text-red-700">
-          Failed to load Google Maps. Check your API key configuration.
-        </p>
-      </div>
-    );
-  }
-
-  if (!isLoaded) {
-    return (
-      <div className={`flex items-center justify-center bg-[var(--surface-muted)] ${className}`}>
-        <p className="text-sm text-[var(--muted)]">Loading map…</p>
+        <p className="px-6 text-sm text-red-700">Failed to load map: {loadError}</p>
       </div>
     );
   }
 
   return (
     <div className={`relative ${className}`}>
-      <GoogleMap
-        mapContainerClassName="h-full w-full"
-        center={center}
-        zoom={zoom}
-        onLoad={onLoad}
-        onUnmount={onUnmount}
-        options={{
-          streetViewControl: false,
-          mapTypeControl: false,
-          fullscreenControl: true,
-        }}
-      >
-        <ComplaintMarkers
-          map={map}
-          complaints={complaints}
-          selectedId={selectedComplaintId}
-          onSelect={onSelectComplaint}
-        />
-      </GoogleMap>
+      <div ref={containerRef} className="h-full w-full" aria-label="Civic map" />
+      <MapAttribution />
+
+      {!mapReady && (
+        <div className="absolute inset-0 flex items-center justify-center bg-[var(--surface-muted)]">
+          <p className="text-sm text-[var(--muted)]">Loading map…</p>
+        </div>
+      )}
+
+      <ComplaintMapLayers
+        map={mapReady ? mapRef.current : null}
+        complaints={complaints}
+        selectedId={selectedComplaintId}
+        onSelect={onSelectComplaint}
+      />
+
+      {selectedWard && (
+        <div className="absolute left-2 top-2 z-10 max-w-xs rounded-lg border border-civic bg-white/95 px-3 py-2 text-sm shadow-civic-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--primary)]">
+            Selected ward
+          </p>
+          <p className="font-medium text-civic-navy">
+            Ward {selectedWard.wardNo} — {selectedWard.name}
+          </p>
+        </div>
+      )}
 
       {isPreview && (
         <div className="pointer-events-none absolute inset-0 flex items-end justify-center bg-slate-900/20 p-4 sm:items-center">

@@ -1,6 +1,6 @@
 "use client";
 
-import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
+import type { Map as MapLibreMap, MapLayerMouseEvent } from "maplibre-gl";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -13,6 +13,7 @@ import {
 
 import { ComplaintMapLayers } from "./complaint-markers";
 import { MapAttribution } from "./map-attribution";
+import { getMapLibre, isFatalMapError } from "./maplibre-setup";
 import {
   createBaseMapStyle,
   DEFAULT_PUNE_CENTER,
@@ -123,6 +124,7 @@ export function CivicMap({
     }
 
     try {
+      const maplibregl = getMapLibre();
       const map = new maplibregl.Map({
         container: containerRef.current,
         style: createBaseMapStyle(),
@@ -136,8 +138,9 @@ export function CivicMap({
         setMapReady(true);
       });
       map.on("error", (event) => {
-        if (event.error?.message) {
-          setLoadError(event.error.message);
+        const message = event.error?.message;
+        if (message && isFatalMapError(message)) {
+          setLoadError(message);
         }
       });
 
@@ -180,7 +183,6 @@ export function CivicMap({
     map.addSource(WARD_SOURCE_ID, {
       type: "geojson",
       data: geoJsonQuery.data as GeoJSON.FeatureCollection,
-      generateId: true,
       promoteId: "geometry_feature_id",
     });
 
@@ -243,7 +245,7 @@ export function CivicMap({
       }
     };
 
-    const handleMouseMove = (event: maplibregl.MapLayerMouseEvent) => {
+    const handleMouseMove = (event: MapLayerMouseEvent) => {
       const feature = event.features?.[0];
       if (!feature?.id) {
         clearHover();
@@ -262,7 +264,7 @@ export function CivicMap({
       map.getCanvas().style.cursor = "";
     };
 
-    const handleWardClick = (event: maplibregl.MapLayerMouseEvent) => {
+    const handleWardClick = (event: MapLayerMouseEvent) => {
       const feature = event.features?.[0];
       if (!feature?.id || !onSelectWard) {
         return;

@@ -36,7 +36,7 @@ export function AppHeader({ showCitySelector = true }: AppHeaderProps) {
           <Show when="signed-in">
             {isReportingEnabled && (
               <Link
-                href="/complaints/new"
+                href="/complaints/new/location"
                 className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-sm font-medium text-white hover:bg-[var(--primary-hover)]"
               >
                 Report Issue

@@ -1,9 +1,10 @@
 "use client";
 
-import maplibregl, { type Map as MapLibreMap, type Marker } from "maplibre-gl";
+import type { Map as MapLibreMap, Marker } from "maplibre-gl";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { MapAttribution } from "@/features/map/map-attribution";
+import { getMapLibre } from "@/features/map/maplibre-setup";
 import {
   createBaseMapStyle,
   DEFAULT_PUNE_CENTER,
@@ -26,15 +27,6 @@ type MapPickerProps = {
   onLocationChange: (location: MapLocation) => void;
 };
 
-/**
- * Optional reverse geocoder hook point for a future provider.
- * Returns null today so address stays manual unless a geocoder is plugged in.
- */
-export type ReverseGeocoder = (
-  latitude: number,
-  longitude: number,
-) => Promise<{ address: string; placeId?: string | null } | null>;
-
 export function MapPicker({
   latitude,
   longitude,
@@ -45,6 +37,7 @@ export function MapPicker({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const markerRef = useRef<Marker | null>(null);
+  const onLocationChangeRef = useRef(onLocationChange);
 
   const [addressValue, setAddressValue] = useState(address ?? "");
   const [wardValue, setWardValue] = useState(ward ?? "");
@@ -52,41 +45,47 @@ export function MapPicker({
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (address !== null) {
-      setAddressValue(address);
-    }
-  }, [address]);
+    onLocationChangeRef.current = onLocationChange;
+  }, [onLocationChange]);
 
   useEffect(() => {
-    if (ward !== null) {
+    if (address !== null && address !== addressValue) {
+      setAddressValue(address);
+    }
+  }, [address, addressValue]);
+
+  useEffect(() => {
+    if (ward !== null && ward !== wardValue) {
       setWardValue(ward);
     }
-  }, [ward]);
+  }, [ward, wardValue]);
 
-  const emitLocation = useCallback(
+  const publishLocation = useCallback(
     (next: {
       latitude: number | null;
       longitude: number | null;
-      address?: string;
-      ward?: string | null;
+      address: string;
+      ward: string | null;
     }) => {
-      onLocationChange({
+      onLocationChangeRef.current({
         latitude: next.latitude,
         longitude: next.longitude,
-        address: next.address ?? addressValue,
+        address: next.address,
         googlePlaceId: null,
-        ward: next.ward ?? (wardValue.trim() || null),
+        ward: next.ward,
       });
     },
-    [addressValue, onLocationChange, wardValue],
+    [],
   );
 
   const setMarkerAt = useCallback(
-    (lng: number, lat: number) => {
+    (lng: number, lat: number, nextAddress = addressValue, nextWard = wardValue) => {
       const map = mapRef.current;
       if (!map) {
         return;
       }
+
+      const maplibregl = getMapLibre();
 
       if (!markerRef.current) {
         markerRef.current = new maplibregl.Marker({ draggable: true, color: "#2563eb" })
@@ -98,18 +97,25 @@ export function MapPicker({
           if (!position) {
             return;
           }
-          emitLocation({
+          publishLocation({
             latitude: position.lat,
             longitude: position.lng,
+            address: addressValue,
+            ward: wardValue.trim() || null,
           });
         });
       } else {
         markerRef.current.setLngLat([lng, lat]);
       }
 
-      emitLocation({ latitude: lat, longitude: lng });
+      publishLocation({
+        latitude: lat,
+        longitude: lng,
+        address: nextAddress,
+        ward: nextWard.trim() || null,
+      });
     },
-    [emitLocation],
+    [addressValue, publishLocation, wardValue],
   );
 
   useEffect(() => {
@@ -118,6 +124,7 @@ export function MapPicker({
     }
 
     try {
+      const maplibregl = getMapLibre();
       const initialCenter =
         latitude !== null && longitude !== null
           ? ([longitude, latitude] as [number, number])
@@ -159,22 +166,6 @@ export function MapPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- single map mount
   }, []);
 
-  useEffect(() => {
-    if (!mapReady || latitude === null || longitude === null) {
-      return;
-    }
-    setMarkerAt(longitude, latitude);
-  }, [latitude, longitude, mapReady, setMarkerAt]);
-
-  useEffect(() => {
-    emitLocation({
-      latitude,
-      longitude,
-      address: addressValue,
-      ward: wardValue.trim() || null,
-    });
-  }, [addressValue, wardValue, latitude, longitude, emitLocation]);
-
   if (loadError) {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -205,7 +196,16 @@ export function MapPicker({
           type="text"
           placeholder="e.g. Kothrud, Hadapsar"
           value={wardValue}
-          onChange={(event) => setWardValue(event.target.value)}
+          onChange={(event) => {
+            const value = event.target.value;
+            setWardValue(value);
+            publishLocation({
+              latitude,
+              longitude,
+              address: addressValue,
+              ward: value.trim() || null,
+            });
+          }}
           className="w-full rounded-lg border border-neutral-300 px-3 py-2"
         />
       </label>
@@ -215,7 +215,16 @@ export function MapPicker({
         <textarea
           placeholder="Street, landmark, or nearby reference"
           value={addressValue}
-          onChange={(event) => setAddressValue(event.target.value)}
+          onChange={(event) => {
+            const value = event.target.value;
+            setAddressValue(value);
+            publishLocation({
+              latitude,
+              longitude,
+              address: value,
+              ward: wardValue.trim() || null,
+            });
+          }}
           rows={3}
           className="w-full rounded-lg border border-neutral-300 px-3 py-2"
         />

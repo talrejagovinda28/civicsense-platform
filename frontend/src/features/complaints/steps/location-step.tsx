@@ -1,10 +1,31 @@
 "use client";
 
+import { useCallback } from "react";
+
 import { MapPicker } from "../components/map-picker";
 import { useComplaintWizard } from "../wizard-context";
 
 export function LocationStep() {
   const { draft, updateDraft } = useComplaintWizard();
+
+  const handleLocationChange = useCallback(
+    (location: {
+      latitude: number | null;
+      longitude: number | null;
+      address: string;
+      googlePlaceId: string | null;
+      ward?: string | null;
+    }) => {
+      updateDraft({
+        latitude: location.latitude,
+        longitude: location.longitude,
+        address: location.address,
+        googlePlaceId: location.googlePlaceId,
+        ward: location.ward !== undefined ? location.ward : draft.ward,
+      });
+    },
+    [draft.ward, updateDraft],
+  );
 
   return (
     <div className="space-y-4">
@@ -37,15 +58,7 @@ export function LocationStep() {
       longitude={draft.longitude}
       address={draft.address}
       ward={draft.ward}
-      onLocationChange={(location) =>
-        updateDraft({
-          latitude: location.latitude,
-          longitude: location.longitude,
-          address: location.address,
-          googlePlaceId: location.googlePlaceId,
-          ward: location.ward !== undefined ? location.ward : draft.ward,
-        })
-      }
+      onLocationChange={handleLocationChange}
     />
     </div>
   );

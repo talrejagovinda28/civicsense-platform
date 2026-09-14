@@ -23,19 +23,9 @@ export const OPENSTREETMAP_RASTER: MapTileProviderConfig = {
 /** Active provider for the MVP — OpenStreetMap raster tiles (no API key). */
 export const MAP_TILE_PROVIDER: MapTileProviderConfig = OPENSTREETMAP_RASTER;
 
-/**
- * Font glyphs for MapLibre symbol layers (cluster counts, labels).
- * Swap alongside tile provider when changing map stack.
- */
-export const MAP_GLYPHS_URL =
-  "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf";
-
-export const MAP_DEFAULT_FONTS = ["Open Sans Regular", "Arial Unicode MS Regular"] as const;
-
 export function createBaseMapStyle() {
   return {
     version: 8 as const,
-    glyphs: MAP_GLYPHS_URL,
     sources: {
       [MAP_TILE_PROVIDER.id]: {
         type: "raster" as const,

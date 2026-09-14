@@ -13,7 +13,7 @@ import {
 
 import { ComplaintMapLayers } from "./complaint-markers";
 import { MapAttribution } from "./map-attribution";
-import { getMapLibre, isFatalMapError } from "./maplibre-setup";
+import { getMapLibre, isFatalMapError, resizeMap } from "./maplibre-setup";
 import {
   createBaseMapStyle,
   DEFAULT_PUNE_CENTER,
@@ -35,11 +35,7 @@ type CivicMapProps = {
   className?: string;
 };
 
-const COMPLAINT_LAYER_IDS = [
-  "complaint-points",
-  "complaint-cluster-count",
-  "complaint-clusters",
-] as const;
+const COMPLAINT_LAYER_IDS = ["complaint-points", "complaint-clusters"] as const;
 
 function moveComplaintLayersToTop(map: MapLibreMap) {
   for (const layerId of COMPLAINT_LAYER_IDS) {
@@ -76,7 +72,7 @@ export function CivicMap({
   const hoveredWardIdRef = useRef<string | number | null>(null);
   const selectedWardFeatureIdRef = useRef<string | number | null>(null);
 
-  const { selectedCity, citySlug, isReportingEnabled } = useCity();
+  const { selectedCity, citySlug } = useCity();
   const [mapReady, setMapReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -84,7 +80,7 @@ export function CivicMap({
     ? { lat: selectedCity.center_lat, lng: selectedCity.center_lng }
     : DEFAULT_PUNE_CENTER;
   const zoom = selectedCity?.default_zoom ?? DEFAULT_PUNE_ZOOM;
-  const isPreview = selectedCity?.status === "preview" || !isReportingEnabled;
+  const isPreview = selectedCity?.status === "preview";
 
   const geoJsonQuery = useQuery({
     queryKey: ["ward-geojson", citySlug],
@@ -135,6 +131,7 @@ export function CivicMap({
 
       map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
       map.on("load", () => {
+        resizeMap(map);
         setMapReady(true);
       });
       map.on("error", (event) => {
@@ -161,6 +158,23 @@ export function CivicMap({
 
   useEffect(() => {
     const map = mapRef.current;
+    const container = containerRef.current;
+    if (!map || !container || !mapReady) {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      resizeMap(map);
+    });
+    observer.observe(container);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [mapReady]);
+
+  useEffect(() => {
+    const map = mapRef.current;
     if (!map || !mapReady) {
       return;
     }
@@ -180,132 +194,146 @@ export function CivicMap({
 
     removeWardLayers(map);
 
-    map.addSource(WARD_SOURCE_ID, {
-      type: "geojson",
-      data: geoJsonQuery.data as GeoJSON.FeatureCollection,
-      promoteId: "geometry_feature_id",
-    });
+    let handleMouseMove: ((event: MapLayerMouseEvent) => void) | null = null;
+    let handleMouseLeave: (() => void) | null = null;
+    let handleWardClick: ((event: MapLayerMouseEvent) => void) | null = null;
 
-    map.addLayer({
-      id: WARD_FILL_LAYER_ID,
-      type: "fill",
-      source: WARD_SOURCE_ID,
-      paint: {
-        "fill-color": [
-          "case",
-          ["boolean", ["feature-state", "selected"], false],
-          "#1d4ed8",
-          ["boolean", ["feature-state", "hover"], false],
-          "#3b82f6",
-          "#2563eb",
-        ],
-        "fill-opacity": [
-          "case",
-          ["boolean", ["feature-state", "selected"], false],
-          0.22,
-          ["boolean", ["feature-state", "hover"], false],
-          0.14,
-          0.06,
-        ],
-      },
-    });
+    try {
+      map.addSource(WARD_SOURCE_ID, {
+        type: "geojson",
+        data: geoJsonQuery.data as GeoJSON.FeatureCollection,
+        promoteId: "geometry_feature_id",
+      });
 
-    map.addLayer({
-      id: WARD_LINE_LAYER_ID,
-      type: "line",
-      source: WARD_SOURCE_ID,
-      paint: {
-        "line-color": [
-          "case",
-          ["boolean", ["feature-state", "selected"], false],
-          "#1e40af",
-          ["boolean", ["feature-state", "hover"], false],
-          "#2563eb",
-          "#2563eb",
-        ],
-        "line-width": [
-          "case",
-          ["boolean", ["feature-state", "selected"], false],
-          2,
-          ["boolean", ["feature-state", "hover"], false],
-          1.5,
-          1,
-        ],
-        "line-opacity": 0.55,
-      },
-    });
+      map.addLayer({
+        id: WARD_FILL_LAYER_ID,
+        type: "fill",
+        source: WARD_SOURCE_ID,
+        paint: {
+          "fill-color": [
+            "case",
+            ["boolean", ["feature-state", "selected"], false],
+            "#1d4ed8",
+            ["boolean", ["feature-state", "hover"], false],
+            "#3b82f6",
+            "#2563eb",
+          ],
+          "fill-opacity": [
+            "case",
+            ["boolean", ["feature-state", "selected"], false],
+            0.22,
+            ["boolean", ["feature-state", "hover"], false],
+            0.14,
+            0.06,
+          ],
+        },
+      });
 
-    const clearHover = () => {
-      if (hoveredWardIdRef.current !== null) {
-        map.setFeatureState(
-          { source: WARD_SOURCE_ID, id: hoveredWardIdRef.current },
-          { hover: false },
-        );
-        hoveredWardIdRef.current = null;
-      }
-    };
+      map.addLayer({
+        id: WARD_LINE_LAYER_ID,
+        type: "line",
+        source: WARD_SOURCE_ID,
+        paint: {
+          "line-color": [
+            "case",
+            ["boolean", ["feature-state", "selected"], false],
+            "#1e40af",
+            ["boolean", ["feature-state", "hover"], false],
+            "#2563eb",
+            "#2563eb",
+          ],
+          "line-width": [
+            "case",
+            ["boolean", ["feature-state", "selected"], false],
+            2,
+            ["boolean", ["feature-state", "hover"], false],
+            1.5,
+            1,
+          ],
+          "line-opacity": 0.55,
+        },
+      });
 
-    const handleMouseMove = (event: MapLayerMouseEvent) => {
-      const feature = event.features?.[0];
-      if (!feature?.id) {
+      const clearHover = () => {
+        if (hoveredWardIdRef.current !== null) {
+          map.setFeatureState(
+            { source: WARD_SOURCE_ID, id: hoveredWardIdRef.current },
+            { hover: false },
+          );
+          hoveredWardIdRef.current = null;
+        }
+      };
+
+      handleMouseMove = (event: MapLayerMouseEvent) => {
+        const feature = event.features?.[0];
+        if (!feature?.id) {
+          clearHover();
+          return;
+        }
+
+        if (hoveredWardIdRef.current !== feature.id) {
+          clearHover();
+          hoveredWardIdRef.current = feature.id;
+          map.setFeatureState({ source: WARD_SOURCE_ID, id: feature.id }, { hover: true });
+        }
+      };
+
+      handleMouseLeave = () => {
         clearHover();
-        return;
-      }
+        map.getCanvas().style.cursor = "";
+      };
 
-      if (hoveredWardIdRef.current !== feature.id) {
-        clearHover();
-        hoveredWardIdRef.current = feature.id;
-        map.setFeatureState({ source: WARD_SOURCE_ID, id: feature.id }, { hover: true });
-      }
-    };
+      handleWardClick = (event: MapLayerMouseEvent) => {
+        const feature = event.features?.[0];
+        if (!feature?.id || !onSelectWard) {
+          return;
+        }
 
-    const handleMouseLeave = () => {
-      clearHover();
-      map.getCanvas().style.cursor = "";
-    };
+        const ward = wardByFeatureId(feature.id);
+        if (!ward) {
+          return;
+        }
 
-    const handleWardClick = (event: MapLayerMouseEvent) => {
-      const feature = event.features?.[0];
-      if (!feature?.id || !onSelectWard) {
-        return;
-      }
+        if (selectedWardFeatureIdRef.current !== null) {
+          map.setFeatureState(
+            { source: WARD_SOURCE_ID, id: selectedWardFeatureIdRef.current },
+            { selected: false },
+          );
+        }
 
-      const ward = wardByFeatureId(feature.id);
-      if (!ward) {
-        return;
-      }
+        const isSameWard = selectedWard?.id === ward.id;
+        if (isSameWard) {
+          selectedWardFeatureIdRef.current = null;
+          onSelectWard(null);
+          return;
+        }
 
-      if (selectedWardFeatureIdRef.current !== null) {
-        map.setFeatureState(
-          { source: WARD_SOURCE_ID, id: selectedWardFeatureIdRef.current },
-          { selected: false },
-        );
-      }
+        selectedWardFeatureIdRef.current = feature.id;
+        map.setFeatureState({ source: WARD_SOURCE_ID, id: feature.id }, { selected: true });
+        onSelectWard(ward);
+      };
 
-      const isSameWard = selectedWard?.id === ward.id;
-      if (isSameWard) {
-        selectedWardFeatureIdRef.current = null;
-        onSelectWard(null);
-        return;
-      }
-
-      selectedWardFeatureIdRef.current = feature.id;
-      map.setFeatureState({ source: WARD_SOURCE_ID, id: feature.id }, { selected: true });
-      onSelectWard(ward);
-    };
-
-    map.on("mousemove", WARD_FILL_LAYER_ID, handleMouseMove);
-    map.on("mouseleave", WARD_FILL_LAYER_ID, handleMouseLeave);
-    map.on("mouseenter", WARD_FILL_LAYER_ID, () => {
-      map.getCanvas().style.cursor = "pointer";
-    });
-    map.on("click", WARD_FILL_LAYER_ID, handleWardClick);
-    moveComplaintLayersToTop(map);
+      map.on("mousemove", WARD_FILL_LAYER_ID, handleMouseMove);
+      map.on("mouseleave", WARD_FILL_LAYER_ID, handleMouseLeave);
+      map.on("mouseenter", WARD_FILL_LAYER_ID, () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("click", WARD_FILL_LAYER_ID, handleWardClick);
+      moveComplaintLayersToTop(map);
+    } catch (error) {
+      console.error("Failed to add ward map layers:", error);
+    }
 
     return () => {
-      map.off("mousemove", WARD_FILL_LAYER_ID, handleMouseMove);
-      map.off("mouseleave", WARD_FILL_LAYER_ID, handleMouseLeave);
-      map.off("click", WARD_FILL_LAYER_ID, handleWardClick);
+      if (handleMouseMove) {
+        map.off("mousemove", WARD_FILL_LAYER_ID, handleMouseMove);
+      }
+      if (handleMouseLeave) {
+        map.off("mouseleave", WARD_FILL_LAYER_ID, handleMouseLeave);
+      }
+      if (handleWardClick) {
+        map.off("click", WARD_FILL_LAYER_ID, handleWardClick);
+      }
       removeWardLayers(map);
       hoveredWardIdRef.current = null;
       selectedWardFeatureIdRef.current = null;
@@ -314,11 +342,11 @@ export function CivicMap({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapReady || !selectedWard) {
+    if (!map || !mapReady || !selectedWard || !geoJsonQuery.data || !map.getSource(WARD_SOURCE_ID)) {
       return;
     }
 
-    const feature = (geoJsonQuery.data as GeoJSON.FeatureCollection | undefined)?.features.find(
+    const feature = (geoJsonQuery.data as GeoJSON.FeatureCollection).features.find(
       (item) => Number(item.properties?.ward_no) === selectedWard.wardNo,
     );
     if (!feature?.properties?.geometry_feature_id) {

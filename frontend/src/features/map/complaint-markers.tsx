@@ -5,11 +5,8 @@ import { useEffect } from "react";
 
 import { ComplaintFeedItem, STATUS_COLORS } from "@/lib/api";
 
-import { MAP_DEFAULT_FONTS } from "./tile-config";
-
 const SOURCE_ID = "complaints";
 const CLUSTER_LAYER_ID = "complaint-clusters";
-const CLUSTER_COUNT_LAYER_ID = "complaint-cluster-count";
 const POINT_LAYER_ID = "complaint-points";
 
 type ComplaintMapLayersProps = {
@@ -48,7 +45,7 @@ function complaintsToGeoJson(
 }
 
 function removeComplaintLayers(map: MapLibreMap) {
-  for (const layerId of [POINT_LAYER_ID, CLUSTER_COUNT_LAYER_ID, CLUSTER_LAYER_ID]) {
+  for (const layerId of [POINT_LAYER_ID, CLUSTER_LAYER_ID]) {
     if (map.getLayer(layerId)) {
       map.removeLayer(layerId);
     }
@@ -65,72 +62,61 @@ export function ComplaintMapLayers({
   onSelect,
 }: ComplaintMapLayersProps) {
   useEffect(() => {
-    if (!map) {
+    if (!map || !map.isStyleLoaded()) {
       return;
     }
 
-    const data = complaintsToGeoJson(complaints, selectedId);
-    const existing = map.getSource(SOURCE_ID) as GeoJSONSource | undefined;
+    try {
+      const data = complaintsToGeoJson(complaints, selectedId);
+      const existing = map.getSource(SOURCE_ID) as GeoJSONSource | undefined;
 
-    if (existing) {
-      existing.setData(data);
-      return;
+      if (existing) {
+        existing.setData(data);
+        return;
+      }
+
+      map.addSource(SOURCE_ID, {
+        type: "geojson",
+        data,
+        cluster: true,
+        clusterMaxZoom: 14,
+        clusterRadius: 50,
+      });
+
+      map.addLayer({
+        id: CLUSTER_LAYER_ID,
+        type: "circle",
+        source: SOURCE_ID,
+        filter: ["has", "point_count"],
+        paint: {
+          "circle-color": "#2563eb",
+          "circle-radius": ["step", ["get", "point_count"], 16, 10, 20, 25, 24],
+          "circle-opacity": 0.85,
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
+
+      map.addLayer({
+        id: POINT_LAYER_ID,
+        type: "circle",
+        source: SOURCE_ID,
+        filter: ["!", ["has", "point_count"]],
+        paint: {
+          "circle-color": [
+            "case",
+            ["get", "selected"],
+            "#1e293b",
+            ["get", "color"],
+          ],
+          "circle-radius": ["case", ["get", "selected"], 10, 8],
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
+    } catch (error) {
+      console.error("Failed to add complaint map layers:", error);
     }
-
-    map.addSource(SOURCE_ID, {
-      type: "geojson",
-      data,
-      cluster: true,
-      clusterMaxZoom: 14,
-      clusterRadius: 50,
-    });
-
-    map.addLayer({
-      id: CLUSTER_LAYER_ID,
-      type: "circle",
-      source: SOURCE_ID,
-      filter: ["has", "point_count"],
-      paint: {
-        "circle-color": "#2563eb",
-        "circle-radius": ["step", ["get", "point_count"], 16, 10, 20, 25, 24],
-        "circle-opacity": 0.85,
-        "circle-stroke-width": 2,
-        "circle-stroke-color": "#ffffff",
-      },
-    });
-
-    map.addLayer({
-      id: CLUSTER_COUNT_LAYER_ID,
-      type: "symbol",
-      source: SOURCE_ID,
-      filter: ["has", "point_count"],
-      layout: {
-        "text-field": ["get", "point_count_abbreviated"],
-        "text-font": [...MAP_DEFAULT_FONTS],
-        "text-size": 12,
-      },
-      paint: {
-        "text-color": "#ffffff",
-      },
-    });
-
-    map.addLayer({
-      id: POINT_LAYER_ID,
-      type: "circle",
-      source: SOURCE_ID,
-      filter: ["!", ["has", "point_count"]],
-      paint: {
-        "circle-color": [
-          "case",
-          ["get", "selected"],
-          "#1e293b",
-          ["get", "color"],
-        ],
-        "circle-radius": ["case", ["get", "selected"], 10, 8],
-        "circle-stroke-width": 2,
-        "circle-stroke-color": "#ffffff",
-      },
-    });
 
     return () => {
       removeComplaintLayers(map);

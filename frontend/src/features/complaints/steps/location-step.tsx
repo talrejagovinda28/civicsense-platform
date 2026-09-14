@@ -1,9 +1,21 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback } from "react";
 
-import { MapPicker } from "../components/map-picker";
 import { useComplaintWizard } from "../wizard-context";
+
+const MapPicker = dynamic(
+  () => import("../components/map-picker").then((module) => module.MapPicker),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-80 items-center justify-center rounded-lg border border-neutral-200 bg-neutral-50 text-sm text-neutral-500">
+        Loading map…
+      </div>
+    ),
+  },
+);
 
 export function LocationStep() {
   const { draft, updateDraft } = useComplaintWizard();

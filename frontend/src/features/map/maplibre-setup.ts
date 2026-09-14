@@ -2,19 +2,17 @@
 
 import maplibregl from "maplibre-gl";
 
-/** Keep in sync with maplibre-gl version in package.json */
-const MAPLIBRE_GL_VERSION = "4.7.1";
-
 let workerConfigured = false;
 
+/** Self-hosted worker shipped in /public/maplibre (see scripts/copy-maplibre-worker.mjs). */
+const MAPLIBRE_WORKER_URL = "/maplibre/maplibre-gl-csp-worker.js";
+
 /**
- * MapLibre requires a web worker. Next.js production bundles need an explicit worker URL.
+ * MapLibre requires a web worker. Use the app-hosted worker for reliable Vercel production.
  */
 export function getMapLibre() {
   if (typeof window !== "undefined" && !workerConfigured) {
-    maplibregl.setWorkerUrl(
-      `https://unpkg.com/maplibre-gl@${MAPLIBRE_GL_VERSION}/dist/maplibre-gl-csp-worker.js`,
-    );
+    maplibregl.setWorkerUrl(MAPLIBRE_WORKER_URL);
     workerConfigured = true;
   }
 
@@ -35,4 +33,10 @@ export function isFatalMapError(message: string): boolean {
     return false;
   }
   return true;
+}
+
+export function resizeMap(map: maplibregl.Map) {
+  requestAnimationFrame(() => {
+    map.resize();
+  });
 }

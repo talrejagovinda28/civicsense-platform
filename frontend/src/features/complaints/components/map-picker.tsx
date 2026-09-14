@@ -4,7 +4,7 @@ import type { Map as MapLibreMap, Marker } from "maplibre-gl";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { MapAttribution } from "@/features/map/map-attribution";
-import { getMapLibre } from "@/features/map/maplibre-setup";
+import { getMapLibre, resizeMap } from "@/features/map/maplibre-setup";
 import {
   createBaseMapStyle,
   DEFAULT_PUNE_CENTER,
@@ -139,6 +139,7 @@ export function MapPicker({
       });
 
       map.on("load", () => {
+        resizeMap(map);
         setMapReady(true);
         if (latitude !== null && longitude !== null) {
           setMarkerAt(longitude, latitude);

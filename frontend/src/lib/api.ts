@@ -485,3 +485,370 @@ export async function updateUserRole(
     },
   );
 }
+
+// --- Social / feed / messaging (graceful when backend not yet deployed) ---
+
+export type ApiResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; unavailable: boolean; error: string };
+
+export async function apiFetchOptional<T>(
+  path: string,
+  token: string | null,
+  options: RequestInit = {},
+): Promise<ApiResult<T>> {
+  try {
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
+      ...(options.headers ?? {}),
+    };
+
+    if (token) {
+      (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers,
+    });
+
+    if (response.status === 404) {
+      return { ok: false, unavailable: true, error: "Endpoint not available" };
+    }
+
+    if (!response.ok) {
+      const message = await response.text();
+      return {
+        ok: false,
+        unavailable: false,
+        error: message || `Request failed: ${response.status}`,
+      };
+    }
+
+    return { ok: true, data: (await response.json()) as T };
+  } catch (error) {
+    return {
+      ok: false,
+      unavailable: false,
+      error: error instanceof Error ? error.message : "Network error",
+    };
+  }
+}
+
+export type FeedItemKind = "complaint" | "update";
+
+export type FeedItem = {
+  id: string;
+  kind: FeedItemKind;
+  complaint_id: string;
+  title: string;
+  description?: string | null;
+  status: string;
+  category_name?: string | null;
+  locality_label?: string | null;
+  responsibility_line?: string | null;
+  image_url?: string | null;
+  images?: ComplaintImageResponse[];
+  like_count: number;
+  affected_count: number;
+  comment_count: number;
+  viewer_liked?: boolean;
+  viewer_affected?: boolean;
+  created_at: string;
+};
+
+export type FeedResponse = {
+  items: FeedItem[];
+  next_cursor: string | null;
+};
+
+export type EngagementCounts = {
+  like_count: number;
+  affected_count: number;
+  comment_count: number;
+  viewer_liked: boolean;
+  viewer_affected: boolean;
+};
+
+export type CommentItem = {
+  id: string;
+  complaint_id: string;
+  author_handle: string;
+  author_display_name: string;
+  body: string;
+  is_official: boolean;
+  created_at: string;
+};
+
+export type PaginatedComments = {
+  items: CommentItem[];
+  total: number;
+  skip: number;
+  limit: number;
+};
+
+export type ProfileResponse = {
+  id: string;
+  handle: string;
+  display_name: string;
+  bio: string | null;
+  is_private: boolean;
+  follower_count: number;
+  following_count: number;
+  viewer_is_following: boolean;
+  viewer_follow_pending: boolean;
+};
+
+export type OwnProfileResponse = ProfileResponse & {
+  home_locality: string | null;
+};
+
+export type ReputationResponse = {
+  lifetime_xp: number;
+  eligible_xp: number;
+  badges: { code: string; label: string; granted_at: string }[];
+  unlocks: {
+    can_initiate_dm: boolean;
+    can_create_groups: boolean;
+  };
+};
+
+export type ChatSummary = {
+  id: string;
+  title: string;
+  kind: "direct" | "group" | "issue";
+  last_message_preview: string | null;
+  last_message_at: string | null;
+  unread_count: number;
+};
+
+export type ChatMessage = {
+  id: string;
+  chat_id: string;
+  sender_handle: string;
+  sender_display_name: string;
+  body: string;
+  created_at: string;
+};
+
+export type PaginatedMessages = {
+  items: ChatMessage[];
+  next_cursor: string | null;
+};
+
+function complaintToFeedItem(
+  complaint: ComplaintFeedItem,
+  token: string | null = null,
+): FeedItem {
+  void token;
+  return {
+    id: complaint.id,
+    kind: "complaint",
+    complaint_id: complaint.id,
+    title: complaint.title,
+    description: complaint.description,
+    status: complaint.status,
+    category_name: complaint.category.name,
+    locality_label: complaint.ward ?? complaint.city,
+    responsibility_line: "Responsibility being verified",
+    image_url: complaint.images[0]?.cloudinary_url ?? null,
+    images: complaint.images,
+    like_count: 0,
+    affected_count: 0,
+    comment_count: 0,
+    created_at: complaint.created_at,
+  };
+}
+
+export async function getFeed(
+  citySlug: string,
+  token: string | null = null,
+  cursor?: string,
+): Promise<FeedResponse & { fallback?: boolean }> {
+  const query = buildQueryString({
+    city: citySlug,
+    mode: "blend",
+    cursor,
+  });
+
+  const result = await apiFetchOptional<FeedResponse>(`/api/v1/feed${query}`, token);
+
+  if (result.ok) {
+    return result.data;
+  }
+
+  const complaints = await getComplaints({ city: citySlug, limit: 50 });
+  return {
+    items: complaints.items.map((item) => complaintToFeedItem(item, token)),
+    next_cursor: null,
+    fallback: true,
+  };
+}
+
+export async function getComplaintEngagement(
+  token: string | null,
+  complaintId: string,
+): Promise<EngagementCounts | null> {
+  const result = await apiFetchOptional<EngagementCounts>(
+    `/api/v1/complaints/${complaintId}/engagement`,
+    token,
+  );
+  return result.ok ? result.data : null;
+}
+
+export async function likeComplaint(
+  token: string,
+  complaintId: string,
+): Promise<ApiResult<EngagementCounts>> {
+  return apiFetchOptional<EngagementCounts>(
+    `/api/v1/complaints/${complaintId}/like`,
+    token,
+    { method: "PUT" },
+  );
+}
+
+export async function unlikeComplaint(
+  token: string,
+  complaintId: string,
+): Promise<ApiResult<EngagementCounts>> {
+  return apiFetchOptional<EngagementCounts>(
+    `/api/v1/complaints/${complaintId}/like`,
+    token,
+    { method: "DELETE" },
+  );
+}
+
+export async function markAffected(
+  token: string,
+  complaintId: string,
+): Promise<ApiResult<EngagementCounts>> {
+  return apiFetchOptional<EngagementCounts>(
+    `/api/v1/complaints/${complaintId}/affected`,
+    token,
+    { method: "PUT" },
+  );
+}
+
+export async function unmarkAffected(
+  token: string,
+  complaintId: string,
+): Promise<ApiResult<EngagementCounts>> {
+  return apiFetchOptional<EngagementCounts>(
+    `/api/v1/complaints/${complaintId}/affected`,
+    token,
+    { method: "DELETE" },
+  );
+}
+
+export async function getComments(
+  complaintId: string,
+  skip = 0,
+  limit = 30,
+): Promise<PaginatedComments | null> {
+  const query = buildQueryString({ skip, limit });
+  const result = await apiFetchOptional<PaginatedComments>(
+    `/api/v1/complaints/${complaintId}/comments${query}`,
+    null,
+  );
+  return result.ok ? result.data : null;
+}
+
+export async function postComment(
+  token: string,
+  complaintId: string,
+  body: string,
+): Promise<ApiResult<CommentItem>> {
+  return apiFetchOptional<CommentItem>(
+    `/api/v1/complaints/${complaintId}/comments`,
+    token,
+    { method: "POST", body: JSON.stringify({ body }) },
+  );
+}
+
+export async function getOwnProfile(token: string): Promise<OwnProfileResponse | null> {
+  const result = await apiFetchOptional<OwnProfileResponse>(
+    "/api/v1/profiles/me",
+    token,
+  );
+  return result.ok ? result.data : null;
+}
+
+export async function updateOwnProfile(
+  token: string,
+  payload: { is_private?: boolean; display_name?: string; bio?: string },
+): Promise<ApiResult<OwnProfileResponse>> {
+  return apiFetchOptional<OwnProfileResponse>("/api/v1/profiles/me", token, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getPublicProfile(
+  handle: string,
+  token: string | null = null,
+): Promise<ProfileResponse | null> {
+  const result = await apiFetchOptional<ProfileResponse>(
+    `/api/v1/profiles/${encodeURIComponent(handle)}`,
+    token,
+  );
+  return result.ok ? result.data : null;
+}
+
+export async function getReputation(token: string): Promise<ReputationResponse | null> {
+  const result = await apiFetchOptional<ReputationResponse>(
+    "/api/v1/profiles/me/reputation",
+    token,
+  );
+  return result.ok ? result.data : null;
+}
+
+export async function followProfile(
+  token: string,
+  profileId: string,
+): Promise<ApiResult<{ following: boolean; pending: boolean }>> {
+  return apiFetchOptional<{ following: boolean; pending: boolean }>(
+    `/api/v1/profiles/${profileId}/follow`,
+    token,
+    { method: "POST" },
+  );
+}
+
+export async function unfollowProfile(
+  token: string,
+  profileId: string,
+): Promise<ApiResult<{ following: boolean; pending: boolean }>> {
+  return apiFetchOptional<{ following: boolean; pending: boolean }>(
+    `/api/v1/profiles/${profileId}/follow`,
+    token,
+    { method: "DELETE" },
+  );
+}
+
+export async function getChats(token: string): Promise<ChatSummary[]> {
+  const result = await apiFetchOptional<ChatSummary[]>("/api/v1/chats", token);
+  return result.ok ? result.data : [];
+}
+
+export async function getChatMessages(
+  token: string,
+  chatId: string,
+  cursor?: string,
+): Promise<PaginatedMessages | null> {
+  const query = buildQueryString({ cursor });
+  const result = await apiFetchOptional<PaginatedMessages>(
+    `/api/v1/chats/${chatId}/messages${query}`,
+    token,
+  );
+  return result.ok ? result.data : null;
+}
+
+export async function sendChatMessage(
+  token: string,
+  chatId: string,
+  body: string,
+): Promise<ApiResult<ChatMessage>> {
+  return apiFetchOptional<ChatMessage>(`/api/v1/chats/${chatId}/messages`, token, {
+    method: "POST",
+    body: JSON.stringify({ body }),
+  });
+}

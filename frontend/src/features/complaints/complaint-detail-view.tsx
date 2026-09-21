@@ -7,11 +7,15 @@ import { useState } from "react";
 
 import { AccountabilityCard } from "@/features/accountability/accountability-card";
 import { OfficialHandoffCard } from "@/features/routing/official-handoff-card";
+import { CommentsSection } from "@/features/social/comments-section";
+import { EngagementBar } from "@/features/social/engagement-bar";
 import {
   apiFetch,
   ComplaintDetail,
   ComplaintFeedItem,
+  EngagementCounts,
   getComplaint,
+  getComplaintEngagement,
   getNextStatusOptions,
   STATUS_LABELS,
   updateComplaintStatus,
@@ -43,6 +47,15 @@ export function ComplaintDetailView({ complaintId }: ComplaintDetailViewProps) {
     queryFn: async () => {
       const token = await getToken();
       return getComplaint(token, complaintId);
+    },
+    enabled: isLoaded,
+  });
+
+  const engagementQuery = useQuery({
+    queryKey: ["engagement", complaintId],
+    queryFn: async () => {
+      const token = await getToken();
+      return getComplaintEngagement(token, complaintId);
     },
     enabled: isLoaded,
   });
@@ -92,10 +105,20 @@ export function ComplaintDetailView({ complaintId }: ComplaintDetailViewProps) {
   const mapLng = complaint.public_longitude ?? complaint.longitude ?? null;
   const citySlug = complaint.city.toLowerCase().replace(/\s+/g, "-");
 
+  const engagement: EngagementCounts = engagementQuery.data ?? {
+    like_count: 0,
+    affected_count: 0,
+    comment_count: 0,
+    viewer_liked: false,
+    viewer_affected: false,
+  };
+
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
       <ComplaintDetailContent
         complaint={complaint}
+        engagement={engagement}
+        engagementUnavailable={engagementQuery.data === null && !engagementQuery.isLoading}
         canUpdateStatus={canUpdateStatus}
         nextStatuses={nextStatuses}
         selectedStatus={selectedStatus}
@@ -122,6 +145,8 @@ export function ComplaintDetailView({ complaintId }: ComplaintDetailViewProps) {
 
 function ComplaintDetailContent({
   complaint,
+  engagement,
+  engagementUnavailable,
   canUpdateStatus,
   nextStatuses,
   selectedStatus,
@@ -133,6 +158,8 @@ function ComplaintDetailContent({
   onSubmitUpdate,
 }: {
   complaint: ComplaintDetail;
+  engagement: EngagementCounts;
+  engagementUnavailable: boolean;
   canUpdateStatus: boolean;
   nextStatuses: { value: string; label: string }[];
   selectedStatus: string;
@@ -179,6 +206,14 @@ function ComplaintDetailContent({
         />
         {complaint.address && <DetailItem label="Address" value={complaint.address} />}
       </dl>
+
+      <EngagementBar
+        complaintId={complaint.id}
+        initial={engagement}
+        unavailable={engagementUnavailable}
+      />
+
+      <CommentsSection complaintId={complaint.id} />
 
       <section>
         <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">

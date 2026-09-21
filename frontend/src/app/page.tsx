@@ -1,5 +1,5 @@
-import { HomeView } from "@/features/auth/home-view";
+import { FeedView } from "@/features/feed/feed-view";
 
 export default function HomePage() {
-  return <HomeView />;
+  return <FeedView />;
 }

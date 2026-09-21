@@ -6,6 +6,8 @@ const isProtectedRoute = createRouteMatcher([
   "/complaints/new(.*)",
   "/officer(.*)",
   "/admin(.*)",
+  "/chats(.*)",
+  "/profile",
 ]);
 
 const isOfficerRoute = createRouteMatcher(["/officer(.*)"]);

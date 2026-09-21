@@ -4,7 +4,7 @@ import uuid
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, Float, ForeignKey, String, Text
+from sqlalchemy import Boolean, Enum, Float, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,6 +27,27 @@ class ComplaintStatus(StrEnum):
     IN_PROGRESS = "in_progress"
     RESOLVED = "resolved"
     CLOSED = "closed"
+
+
+class VerificationState(StrEnum):
+    NONE = "none"
+    PENDING = "pending"
+    VERIFIED = "verified"
+    DISPUTED = "disputed"
+
+
+class SubmissionState(StrEnum):
+    INTERNAL_CREATED = "internal_created"
+    CONSENTED = "consented"
+    DISPATCHED = "dispatched"
+    RECEIPT_RECORDED = "receipt_recorded"
+
+
+class RouteConfidence(StrEnum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    UNKNOWN = "unknown"
 
 
 class Complaint(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -84,6 +105,20 @@ class Complaint(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     public_latitude: Mapped[float | None] = mapped_column(nullable=True)
     public_longitude: Mapped[float | None] = mapped_column(nullable=True)
+    anonymous_to_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_sensitive: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    public_caption: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verification_state: Mapped[str] = mapped_column(
+        String(30),
+        default=VerificationState.NONE,
+        nullable=False,
+    )
+    submission_state: Mapped[str] = mapped_column(
+        String(30),
+        default=SubmissionState.INTERNAL_CREATED,
+        nullable=False,
+    )
+    route_confidence: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     city_ref = relationship("City", foreign_keys=[city_id])
     electoral_ward = relationship("ElectoralWard", foreign_keys=[electoral_ward_id])

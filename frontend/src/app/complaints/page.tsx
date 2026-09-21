@@ -1,17 +1,19 @@
-import { Suspense } from "react";
+import { redirect } from "next/navigation";
 
-import { ComplaintsFeedView } from "@/features/complaints/complaints-feed-view";
+type ComplaintsPageProps = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
 
-export default function ComplaintsPage() {
-  return (
-    <Suspense
-      fallback={
-        <main className="mx-auto min-h-screen max-w-3xl px-6 py-12">
-          <p className="text-sm text-neutral-500">Loading complaints…</p>
-        </main>
-      }
-    >
-      <ComplaintsFeedView />
-    </Suspense>
-  );
+export default async function ComplaintsPage({ searchParams }: ComplaintsPageProps) {
+  const params = await searchParams;
+  const query = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof value === "string") {
+      query.set(key, value);
+    }
+  }
+
+  const suffix = query.toString();
+  redirect(suffix ? `/?${suffix}` : "/");
 }

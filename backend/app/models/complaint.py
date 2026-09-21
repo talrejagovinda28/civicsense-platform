@@ -32,6 +32,7 @@ class ComplaintStatus(StrEnum):
 class VerificationState(StrEnum):
     NONE = "none"
     PENDING = "pending"
+    CONFIRMED_BY_REPORTER = "confirmed_by_reporter"
     VERIFIED = "verified"
     DISPUTED = "disputed"
 

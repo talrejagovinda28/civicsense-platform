@@ -10,6 +10,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.authority_channel import ChannelActivation, ChannelMode, ExternalChannel
 from app.models.complaint import Complaint
 from app.models.submission import (
@@ -23,6 +24,7 @@ from app.models.submission import (
     TimelineVisibility,
 )
 from app.services.adapters.base import OutcomeState
+from app.services.adapters.fake import FakeAdapter
 from app.services.adapters.registry import ChannelNotEnabled, get_adapter
 
 
@@ -34,6 +36,7 @@ class IntentStatus(StrEnum):
     PROVIDER_ACCEPTED = "provider_accepted"
     ACK_PENDING = "ack_pending"
     OFFICIALLY_REGISTERED = "officially_registered"
+    SIMULATED_REGISTERED = "simulated_registered"
     REJECTED = "rejected"
     UNKNOWN_OUTCOME = "unknown_outcome"
     FAILED = "failed"
@@ -65,7 +68,9 @@ def _intent_payload(
     }
 
 
-def _outcome_to_intent_status(outcome_state: OutcomeState) -> str:
+def _outcome_to_intent_status(outcome_state: OutcomeState, *, is_simulated: bool = False) -> str:
+    if is_simulated and outcome_state == OutcomeState.OFFICIALLY_REGISTERED:
+        return IntentStatus.SIMULATED_REGISTERED
     mapping = {
         OutcomeState.NOT_SENT: IntentStatus.FAILED,
         OutcomeState.USER_ACTION_REQUIRED: IntentStatus.USER_ACTION_REQUIRED,
@@ -155,7 +160,7 @@ def create_intent_and_dispatch(
     complaint_id: uuid.UUID,
     consent_id: uuid.UUID,
     idempotency_key: str,
-    test_scenario: str | None = None,
+    _test_scenario: str | None = None,
 ) -> dict:
     complaint = db.get(Complaint, complaint_id)
     if complaint is None:
@@ -167,6 +172,20 @@ def create_intent_and_dispatch(
         select(SubmissionIntent).where(SubmissionIntent.idempotency_key == idempotency_key)
     )
     if existing is not None:
+        existing_complaint = db.get(Complaint, existing.complaint_id)
+        existing_consent = db.get(SubmissionConsent, existing.consent_id)
+        if (
+            existing_complaint is None
+            or existing_complaint.user_id != user_id
+            or existing.complaint_id != complaint_id
+            or existing_consent is None
+            or existing_consent.user_id != user_id
+            or existing.consent_id != consent_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Idempotency key conflict",
+            )
         latest = max(existing.attempts, key=lambda a: a.attempt_no, default=None)
         return {
             "intent_id": existing.id,
@@ -179,6 +198,8 @@ def create_intent_and_dispatch(
     consent = db.get(SubmissionConsent, consent_id)
     if consent is None or consent.complaint_id != complaint_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Consent not found")
+    if consent.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
     if consent.revoked_at is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Consent revoked")
 
@@ -188,19 +209,37 @@ def create_intent_and_dispatch(
 
     activation = ChannelActivation(channel.activation)
     mode = ChannelMode(channel.mode)
-    simulation = activation in {ChannelActivation.TEST_ONLY, ChannelActivation.DISABLED} and (
-        test_scenario is not None or activation == ChannelActivation.TEST_ONLY
-    )
+    is_guided = mode in {ChannelMode.GUIDED_PORTAL, ChannelMode.GUIDED_WHATSAPP}
+    test_scenario = _test_scenario if settings.fake_adapters_allowed else None
 
-    if not channel.enabled and not simulation and mode not in {
-        ChannelMode.GUIDED_PORTAL,
-        ChannelMode.GUIDED_WHATSAPP,
-    }:
+    if activation == ChannelActivation.DISABLED:
         return {
             "code": "CHANNEL_NOT_ENABLED",
             "message": "Channel is disabled",
             "status": IntentStatus.FAILED,
         }
+
+    if not is_guided:
+        if activation == ChannelActivation.TEST_ONLY:
+            if not settings.fake_adapters_allowed:
+                return {
+                    "code": "CHANNEL_NOT_ENABLED",
+                    "message": "Channel is not enabled for dispatch",
+                    "status": IntentStatus.FAILED,
+                }
+        elif activation in {ChannelActivation.AUTOMATED, ChannelActivation.LIVE_APPROVED}:
+            if not (channel.enabled and settings.EXTERNAL_DISPATCH_GLOBAL_ENABLED):
+                return {
+                    "code": "CHANNEL_NOT_ENABLED",
+                    "message": "Channel is not enabled for live dispatch",
+                    "status": IntentStatus.FAILED,
+                }
+        else:
+            return {
+                "code": "CHANNEL_NOT_ENABLED",
+                "message": "Channel is not enabled for dispatch",
+                "status": IntentStatus.FAILED,
+            }
 
     intent = SubmissionIntent(
         complaint_id=complaint_id,
@@ -216,17 +255,15 @@ def create_intent_and_dispatch(
     db.flush()
 
     try:
-        adapter = get_adapter(channel, simulation=simulation or test_scenario is not None)
+        adapter = get_adapter(channel)
     except ChannelNotEnabled as exc:
-        if mode in {ChannelMode.GUIDED_PORTAL, ChannelMode.GUIDED_WHATSAPP}:
-            adapter = get_adapter(channel, simulation=False)
-        else:
-            return {
-                "code": "CHANNEL_NOT_ENABLED",
-                "message": exc.message,
-                "status": IntentStatus.FAILED,
-            }
+        return {
+            "code": "CHANNEL_NOT_ENABLED",
+            "message": exc.message,
+            "status": IntentStatus.FAILED,
+        }
 
+    is_simulated = isinstance(adapter, FakeAdapter)
     payload = _intent_payload(intent, consent, channel, scenario=test_scenario)
     eligibility = adapter.validate(payload)
     if not eligibility.eligible:
@@ -256,7 +293,14 @@ def create_intent_and_dispatch(
         {**outcome.metadata, "message": outcome.message, "state": outcome.state.value}
     )
 
-    intent.status = _outcome_to_intent_status(outcome.state)
+    intent.status = _outcome_to_intent_status(outcome.state, is_simulated=is_simulated)
+
+    timeline_payload: dict = {
+        "outcome": outcome.state.value,
+        "provider_message_id": outcome.provider_message_id,
+    }
+    if is_simulated:
+        timeline_payload["simulated"] = True
 
     _append_timeline(
         db,
@@ -264,19 +308,18 @@ def create_intent_and_dispatch(
         actor_id=user_id,
         actor_kind=TimelineActorKind.SYSTEM,
         event_type="submission_attempt",
-        public_payload={
-            "outcome": outcome.state.value,
-            "provider_message_id": outcome.provider_message_id,
-        },
+        public_payload=timeline_payload,
         idempotency_key=idempotency_key,
     )
 
     if outcome.official_reference:
+        reference_type = "simulated_test_reference" if is_simulated else "official_token"
         db.add(
             ExternalReference(
                 complaint_id=complaint_id,
                 intent_id=intent.id,
                 reference_value=outcome.official_reference,
+                reference_type=reference_type,
                 tracking_url=outcome.tracking_url,
             )
         )

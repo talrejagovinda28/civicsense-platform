@@ -1,12 +1,13 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class EvidenceSubmitRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     assertion: str = Field(min_length=1, max_length=2000)
-    submitter_role: str = Field(pattern="^(citizen|officer|moderator)$")
     media_url: str | None = None
 
 

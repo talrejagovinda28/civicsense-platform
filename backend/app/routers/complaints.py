@@ -11,6 +11,7 @@ from app.core.deps import (
     get_optional_user,
     require_officer_or_admin,
 )
+from app.services.access import can_view_sensitive_complaint, is_privileged_role
 from app.core.security import ClerkUser
 from app.models.category import Category
 from app.models.city import City
@@ -75,9 +76,19 @@ def _to_feed_item(complaint: Complaint, *, truncate: bool) -> ComplaintFeedItem:
 def _can_view_full(complaint: Complaint, user: ClerkUser | None) -> bool:
     if user is None:
         return False
-    if user.role in {"officer", "admin"}:
+    if is_privileged_role(user.role):
         return True
     return complaint.user_id == user.user_id
+
+
+def _sensitive_visibility_filter(user: ClerkUser | None):
+    if user is None or not is_privileged_role(user.role):
+        if user is None:
+            return Complaint.is_sensitive.is_(False)
+        return (Complaint.is_sensitive.is_(False)) | (
+            Complaint.user_id == user.user_id
+        )
+    return True
 
 
 def _approximate_location_label(complaint: Complaint) -> str | None:
@@ -123,7 +134,11 @@ def _to_detail(complaint: Complaint, user: ClerkUser | None) -> ComplaintDetail:
         latitude=complaint.latitude if full_access else None,
         longitude=complaint.longitude if full_access else None,
         google_place_id=complaint.google_place_id if full_access else None,
-        user_id=complaint.user_id if full_access else None,
+        user_id=(
+            complaint.user_id
+            if full_access and not complaint.anonymous_to_public
+            else None
+        ),
         ai_suggested_category_id=(
             complaint.ai_suggested_category_id if full_access else None
         ),
@@ -191,6 +206,7 @@ def _get_complaint_or_404(db: Session, complaint_id: uuid.UUID) -> Complaint:
 @router.get("", response_model=PaginatedComplaints)
 def list_complaints(
     db: Session = Depends(get_db),
+    current_user: ClerkUser | None = Depends(get_optional_user),
     city: str = Query(default="pune"),
     electoral_ward_id: uuid.UUID | None = Query(default=None),
     status_filter: ComplaintStatus | None = Query(default=None, alias="status"),
@@ -198,7 +214,10 @@ def list_complaints(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> PaginatedComplaints:
+    visibility = _sensitive_visibility_filter(current_user)
     base_stmt = select(Complaint)
+    if visibility is not True:
+        base_stmt = base_stmt.where(visibility)
     filtered_stmt = _apply_complaint_filters(
         base_stmt,
         city_slug=city,
@@ -208,18 +227,16 @@ def list_complaints(
     )
     total = db.scalar(select(func.count()).select_from(filtered_stmt.subquery())) or 0
 
-    stmt = (
-        _apply_complaint_filters(
-            _complaint_stmt(),
-            city_slug=city,
-            electoral_ward_id=electoral_ward_id,
-            status_filter=status_filter,
-            category_id=category_id,
-        )
-        .order_by(Complaint.created_at.desc())
-        .offset(skip)
-        .limit(limit)
+    stmt = _apply_complaint_filters(
+        _complaint_stmt(),
+        city_slug=city,
+        electoral_ward_id=electoral_ward_id,
+        status_filter=status_filter,
+        category_id=category_id,
     )
+    if visibility is not True:
+        stmt = stmt.where(visibility)
+    stmt = stmt.order_by(Complaint.created_at.desc()).offset(skip).limit(limit)
     complaints = db.scalars(stmt).unique().all()
 
     logger.info("Public feed: %d complaints (city=%s)", total, city)
@@ -300,6 +317,13 @@ def get_complaint(
     current_user: ClerkUser | None = Depends(get_optional_user),
 ) -> ComplaintDetail:
     complaint = _get_complaint_or_404(db, complaint_id)
+    viewer_id = current_user.user_id if current_user else None
+    viewer_role = current_user.role if current_user else None
+    if not can_view_sensitive_complaint(complaint, viewer_id, viewer_role):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Complaint not found",
+        )
     return _to_detail(complaint, current_user)
 
 

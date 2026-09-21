@@ -12,7 +12,7 @@ def test_unknown_outcome_idempotent_no_second_attempt(db, complaint, consent, te
         complaint_id=complaint.id,
         consent_id=consent.id,
         idempotency_key=key,
-        test_scenario="timeout_unknown",
+        _test_scenario="timeout_unknown",
     )
     assert first["outcome_state"] == IntentStatus.UNKNOWN_OUTCOME
     assert first["unknown_outcome"] is True
@@ -26,7 +26,7 @@ def test_unknown_outcome_idempotent_no_second_attempt(db, complaint, consent, te
         complaint_id=complaint.id,
         consent_id=consent.id,
         idempotency_key=key,
-        test_scenario="timeout_unknown",
+        _test_scenario="timeout_unknown",
     )
     assert replay["idempotent_replay"] is True
     assert replay["status"] == IntentStatus.UNKNOWN_OUTCOME

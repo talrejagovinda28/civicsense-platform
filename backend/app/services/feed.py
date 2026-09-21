@@ -7,31 +7,72 @@ from sqlalchemy import and_, inspect, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.city import City
-from app.models.community import FeedEvent
+from app.models.community import FeedEvent, FeedEventKind
 from app.models.complaint import Complaint
+from app.services.social import get_engagement_counts
+
+DESCRIPTION_PREVIEW_LENGTH = 150
+RESPONSIBILITY_LINE = "Responsibility being verified"
 
 
 def _table_exists(db: Session, table_name: str) -> bool:
     return inspect(db.bind).has_table(table_name)
 
 
-def _public_complaint_item(complaint: Complaint) -> dict:
+def _truncate(text: str, max_length: int = DESCRIPTION_PREVIEW_LENGTH) -> str:
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 3].rstrip() + "..."
+
+
+def _map_feed_kind(event_kind: str) -> str:
+    if event_kind == FeedEventKind.MILESTONE:
+        return "update"
+    return "complaint"
+
+
+def _public_description(complaint: Complaint) -> str:
+    text = complaint.public_caption or complaint.description
+    return _truncate(text)
+
+
+def _locality_label(complaint: Complaint) -> str | None:
+    return complaint.ward or complaint.city
+
+
+def _build_feed_item(
+    db: Session,
+    *,
+    item_id: uuid.UUID,
+    complaint: Complaint,
+    kind: str,
+    published_at: datetime,
+    viewer_id: str | None,
+) -> dict:
     images = sorted(complaint.images, key=lambda img: img.sort_order)
+    image_url = images[0].cloudinary_url if images else None
+    engagement = get_engagement_counts(db, complaint_id=complaint.id, viewer_id=viewer_id)
+    category_name = complaint.category.name if complaint.category else None
+
     return {
-        "id": complaint.id,
-        "kind": "original",
+        "id": item_id,
+        "complaint_id": complaint.id,
+        "kind": kind,
         "title": complaint.title,
-        "caption": complaint.public_caption or complaint.title,
+        "description": _public_description(complaint),
         "status": complaint.status.value if hasattr(complaint.status, "value") else complaint.status,
-        "ward": complaint.ward,
-        "city": complaint.city,
-        "category_id": complaint.category_id,
-        "public_latitude": complaint.public_latitude,
-        "public_longitude": complaint.public_longitude,
+        "category_name": category_name,
+        "locality_label": _locality_label(complaint),
+        "responsibility_line": RESPONSIBILITY_LINE,
+        "image_url": image_url,
+        "thumbnail_url": image_url,
+        "like_count": engagement.like_count,
+        "affected_count": engagement.affected_count,
+        "comment_count": engagement.comment_count,
+        "viewer_liked": engagement.viewer_liked,
+        "viewer_affected": engagement.viewer_affected,
         "created_at": complaint.created_at,
-        "published_at": complaint.created_at,
-        "image_count": len(images),
-        "thumbnail_url": images[0].cloudinary_url if images else None,
+        "published_at": published_at,
     }
 
 
@@ -46,7 +87,7 @@ def build_feed(
     limit: int = 30,
     viewer_id: str | None = None,
 ) -> dict:
-    del mode, lat, lng, viewer_id  # reserved for future ranking
+    del mode, lat, lng
 
     city = db.scalar(select(City).where(City.slug == city_slug))
     city_filter = Complaint.city_id == city.id if city else Complaint.city == city_slug.title()
@@ -82,16 +123,22 @@ def build_feed(
         rows = db.execute(stmt).unique().all()
         items = []
         for event, complaint in rows[:limit]:
-            base = _public_complaint_item(complaint)
-            base["kind"] = event.kind
-            base["published_at"] = event.published_at
-            base["feed_event_id"] = event.id
-            items.append(base)
+            items.append(
+                _build_feed_item(
+                    db,
+                    item_id=event.id,
+                    complaint=complaint,
+                    kind=_map_feed_kind(event.kind),
+                    published_at=event.published_at,
+                    viewer_id=viewer_id,
+                )
+            )
         next_cursor = None
         if len(rows) > limit:
             last_event = rows[limit - 1][0]
             next_cursor = f"{last_event.published_at.isoformat()}|{last_event.id}"
-        return {"items": items, "next_cursor": next_cursor}
+        if items or cursor_created:
+            return {"items": items, "next_cursor": next_cursor}
 
     stmt = (
         select(Complaint)
@@ -109,7 +156,17 @@ def build_feed(
         )
 
     complaints = db.scalars(stmt).unique().all()
-    items = [_public_complaint_item(c) for c in complaints[:limit]]
+    items = [
+        _build_feed_item(
+            db,
+            item_id=complaint.id,
+            complaint=complaint,
+            kind="complaint",
+            published_at=complaint.created_at,
+            viewer_id=viewer_id,
+        )
+        for complaint in complaints[:limit]
+    ]
     next_cursor = None
     if len(complaints) > limit:
         last = complaints[limit - 1]

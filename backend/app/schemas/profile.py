@@ -13,19 +13,33 @@ class ProfileUpdateRequest(BaseModel):
 
 class ProfileResponse(BaseModel):
     id: uuid.UUID
-    user_id: str
     handle: str
-    display_name: str | None
+    display_name: str | None = None
     bio: str | None = None
     is_private: bool = False
-    dm_policy: str = "requests"
-    created_at: datetime
+    follower_count: int = 0
+    following_count: int = 0
+    viewer_is_following: bool = False
+    viewer_follow_pending: bool = False
 
-    model_config = {"from_attributes": True}
+
+class OwnProfileResponse(ProfileResponse):
+    home_locality: str | None = None
+
+
+class BadgeItem(BaseModel):
+    code: str
+    label: str
+    granted_at: datetime
+
+
+class ReputationUnlocks(BaseModel):
+    can_initiate_dm: bool
+    can_create_groups: bool
 
 
 class ReputationResponse(BaseModel):
     lifetime_xp: int
-    can_initiate_dm: bool
-    can_create_group: bool
-    badges: list[str] = Field(default_factory=list)
+    eligible_xp: int
+    badges: list[BadgeItem] = Field(default_factory=list)
+    unlocks: ReputationUnlocks

@@ -6,7 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.complaint import Complaint, VerificationState
-from app.models.resolution import ResolutionEvidence, ResolutionReview
+from app.models.resolution import ResolutionEvidence, ResolutionEvidenceStatus, ResolutionReview
 from app.services.reputation import EVIDENCE_XP, RESOLUTION_XP, grant_xp
 
 
@@ -31,18 +31,6 @@ def submit_evidence(
         media_url=media_url,
     )
     db.add(evidence)
-    db.flush()
-
-    if submitter_role == "officer":
-        grant_xp(
-            db,
-            user_id=user_id,
-            event_key=f"evidence:{evidence.id}",
-            kind="evidence",
-            delta=EVIDENCE_XP,
-            source_entity_id=str(evidence.id),
-        )
-
     db.commit()
     db.refresh(evidence)
     return evidence
@@ -63,7 +51,7 @@ def reporter_confirm(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Reporter only")
 
     complaint.verification_state = (
-        VerificationState.VERIFIED if confirmed else VerificationState.DISPUTED
+        VerificationState.CONFIRMED_BY_REPORTER if confirmed else VerificationState.DISPUTED
     )
 
     db.add(
@@ -89,16 +77,23 @@ def independent_review(
     decision: str,
     reason: str | None = None,
 ) -> ResolutionReview:
+    if reviewer_role not in {"officer", "admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Independent review requires officer or admin role",
+        )
+
     complaint = db.get(Complaint, complaint_id)
     if complaint is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Complaint not found")
 
-    if reviewer_role == "citizen" and complaint.user_id == reviewer_id:
+    if reviewer_role != "admin" and complaint.user_id == reviewer_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Reporter cannot independently verify own case",
         )
 
+    evidence: ResolutionEvidence | None = None
     if evidence_id is not None:
         evidence = db.get(ResolutionEvidence, evidence_id)
         if evidence is None or evidence.complaint_id != complaint_id:
@@ -122,13 +117,35 @@ def independent_review(
         complaint.verification_state = VerificationState.VERIFIED
         grant_xp(
             db,
-            user_id=reviewer_id,
-            event_key=f"resolution:{complaint_id}:{reviewer_id}",
+            user_id=complaint.user_id,
+            event_key=f"resolution_verified:{complaint_id}",
             kind="resolution",
             delta=RESOLUTION_XP,
             source_entity_id=str(complaint_id),
         )
+        if evidence is not None:
+            evidence.status = ResolutionEvidenceStatus.ACCEPTED
+            grant_xp(
+                db,
+                user_id=evidence.submitter_id,
+                event_key=f"evidence:{evidence.id}",
+                kind="evidence",
+                delta=EVIDENCE_XP,
+                source_entity_id=str(evidence.id),
+            )
+    elif decision == "accepted" and evidence is not None:
+        evidence.status = ResolutionEvidenceStatus.ACCEPTED
+        grant_xp(
+            db,
+            user_id=evidence.submitter_id,
+            event_key=f"evidence:{evidence.id}",
+            kind="evidence",
+            delta=EVIDENCE_XP,
+            source_entity_id=str(evidence.id),
+        )
     elif decision == "rejected":
+        if evidence is not None:
+            evidence.status = ResolutionEvidenceStatus.REJECTED
         complaint.verification_state = VerificationState.DISPUTED
 
     db.commit()

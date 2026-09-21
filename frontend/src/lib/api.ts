@@ -525,7 +525,16 @@ export async function apiFetchOptional<T>(
       };
     }
 
-    return { ok: true, data: (await response.json()) as T };
+    if (response.status === 204 || response.headers.get("content-length") === "0") {
+      return { ok: true, data: null as T };
+    }
+
+    const text = await response.text();
+    if (!text) {
+      return { ok: true, data: null as T };
+    }
+
+    return { ok: true, data: JSON.parse(text) as T };
   } catch (error) {
     return {
       ok: false,

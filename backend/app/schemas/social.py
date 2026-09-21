@@ -4,8 +4,33 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+class EngagementCounts(BaseModel):
+    like_count: int
+    affected_count: int
+    comment_count: int
+    viewer_liked: bool = False
+    viewer_affected: bool = False
+
+
 class CommentCreateRequest(BaseModel):
     body: str = Field(min_length=1, max_length=2000)
+
+
+class CommentItem(BaseModel):
+    id: uuid.UUID
+    complaint_id: uuid.UUID
+    author_handle: str
+    author_display_name: str
+    body: str
+    is_official: bool = False
+    created_at: datetime
+
+
+class PaginatedComments(BaseModel):
+    items: list[CommentItem]
+    total: int
+    skip: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
 
 
 class CommentResponse(BaseModel):

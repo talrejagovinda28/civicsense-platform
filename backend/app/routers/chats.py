@@ -6,13 +6,14 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_current_user, get_db
 from app.core.security import ClerkUser
 from app.schemas.messaging import (
+    ChatMessage,
+    ChatSummary,
     ConversationResponse,
     DirectChatRequest,
     DirectChatResponse,
     GroupCreateRequest,
     MessageCreateRequest,
     MessageListResponse,
-    MessageResponse,
     RequestDecideBody,
 )
 from app.services import messaging as messaging_service
@@ -20,13 +21,13 @@ from app.services import messaging as messaging_service
 router = APIRouter(prefix="/chats", tags=["chats"])
 
 
-@router.get("", response_model=list[ConversationResponse])
+@router.get("", response_model=list[ChatSummary])
 def list_chats(
     db: Session = Depends(get_db),
     current_user: ClerkUser = Depends(get_current_user),
-) -> list[ConversationResponse]:
-    conversations = messaging_service.list_conversations(db, user_id=current_user.user_id)
-    return [ConversationResponse.model_validate(c) for c in conversations]
+) -> list[ChatSummary]:
+    summaries = messaging_service.list_chat_summaries(db, user_id=current_user.user_id)
+    return [ChatSummary(**summary) for summary in summaries]
 
 
 @router.post("/direct", response_model=DirectChatResponse)
@@ -72,26 +73,25 @@ def list_chat_messages(
         limit=limit,
     )
     return MessageListResponse(
-        items=[MessageResponse.model_validate(m) for m in result["items"]],
+        items=[ChatMessage(**item) for item in result["items"]],
         next_cursor=result["next_cursor"],
     )
 
 
-@router.post("/{conversation_id}/messages", response_model=MessageResponse)
+@router.post("/{conversation_id}/messages", response_model=ChatMessage)
 def post_chat_message(
     conversation_id: uuid.UUID,
     payload: MessageCreateRequest,
     db: Session = Depends(get_db),
     current_user: ClerkUser = Depends(get_current_user),
-) -> MessageResponse:
-    return MessageResponse.model_validate(
-        messaging_service.post_message(
-            db,
-            user_id=current_user.user_id,
-            conversation_id=conversation_id,
-            body=payload.body,
-        )
+) -> ChatMessage:
+    message = messaging_service.post_message(
+        db,
+        user_id=current_user.user_id,
+        conversation_id=conversation_id,
+        body=payload.body,
     )
+    return ChatMessage(**messaging_service.message_to_chat_item(db, message))
 
 
 @router.post("/groups", response_model=ConversationResponse)

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ConsentCreateRequest(BaseModel):
@@ -22,9 +22,10 @@ class ConsentResponse(BaseModel):
 
 
 class DispatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     consent_id: uuid.UUID
     idempotency_key: str = Field(min_length=8, max_length=128)
-    test_scenario: str | None = None
 
 
 class DispatchResponse(BaseModel):

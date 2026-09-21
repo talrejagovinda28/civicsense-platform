@@ -52,7 +52,6 @@ def dispatch_submission(
         complaint_id=complaint_id,
         consent_id=payload.consent_id,
         idempotency_key=payload.idempotency_key,
-        test_scenario=payload.test_scenario,
     )
     return DispatchResponse(**result)
 

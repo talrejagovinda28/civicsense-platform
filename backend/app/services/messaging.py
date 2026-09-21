@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.community import Follow, FollowStatus, UserBlock
@@ -14,6 +14,7 @@ from app.models.messaging import (
     ConversationType,
     ConversationVisibility,
     Message,
+    MessageRead,
     MessageRequest,
     MessageRequestStatus,
 )
@@ -50,6 +51,108 @@ def _mutual_follow(db: Session, user_a: str, user_b: str) -> bool:
         )
     )
     return a_to_b is not None and b_to_a is not None
+
+
+def _profile_for_user(db: Session, user_id: str) -> UserProfile | None:
+    return db.scalar(select(UserProfile).where(UserProfile.clerk_user_id == user_id))
+
+
+def _sender_identity(db: Session, sender_id: str) -> tuple[str, str]:
+    profile = _profile_for_user(db, sender_id)
+    if profile is not None:
+        handle = profile.handle or f"user_{sender_id[:8]}"
+        display_name = profile.display_name or handle
+        return handle, display_name
+    return f"user_{sender_id[:8]}", "Citizen"
+
+
+def _conversation_kind(conversation_type: str) -> str:
+    if conversation_type == ConversationType.DIRECT:
+        return "direct"
+    if conversation_type == ConversationType.ISSUE:
+        return "issue"
+    return "group"
+
+
+def _conversation_title(db: Session, conversation: Conversation, user_id: str) -> str:
+    if conversation.name:
+        return conversation.name
+    if conversation.type == ConversationType.DIRECT:
+        other_ids = [
+            member.user_id
+            for member in conversation.members
+            if member.user_id != user_id and member.status == "active"
+        ]
+        if other_ids:
+            _, display_name = _sender_identity(db, other_ids[0])
+            return display_name
+        return "Direct chat"
+    return "Group chat"
+
+
+def _last_message(db: Session, conversation_id: uuid.UUID) -> Message | None:
+    return db.scalar(
+        select(Message)
+        .where(
+            Message.conversation_id == conversation_id,
+            Message.deleted_at.is_(None),
+        )
+        .order_by(Message.created_at.desc(), Message.id.desc())
+        .limit(1)
+    )
+
+
+def _unread_count(db: Session, *, conversation_id: uuid.UUID, user_id: str) -> int:
+    read_state = db.scalar(
+        select(MessageRead).where(
+            MessageRead.conversation_id == conversation_id,
+            MessageRead.user_id == user_id,
+        )
+    )
+    stmt = select(func.count()).select_from(Message).where(
+        Message.conversation_id == conversation_id,
+        Message.deleted_at.is_(None),
+        Message.sender_id != user_id,
+    )
+    if read_state is not None:
+        stmt = stmt.where(Message.created_at > read_state.last_read_at)
+    return int(db.scalar(stmt) or 0)
+
+
+def list_chat_summaries(db: Session, *, user_id: str) -> list[dict]:
+    conversations = list(
+        db.scalars(
+            select(Conversation)
+            .join(ConversationMember)
+            .where(
+                ConversationMember.user_id == user_id,
+                ConversationMember.status == "active",
+            )
+            .options(joinedload(Conversation.members))
+            .order_by(Conversation.updated_at.desc())
+        ).unique()
+    )
+    summaries: list[dict] = []
+    for conversation in conversations:
+        last_message = _last_message(db, conversation.id)
+        preview = None
+        last_at = None
+        if last_message is not None:
+            preview = last_message.body[:120]
+            last_at = last_message.created_at
+        summaries.append(
+            {
+                "id": conversation.id,
+                "title": _conversation_title(db, conversation, user_id),
+                "kind": _conversation_kind(conversation.type),
+                "last_message_preview": preview,
+                "last_message_at": last_at,
+                "unread_count": _unread_count(
+                    db, conversation_id=conversation.id, user_id=user_id
+                ),
+            }
+        )
+    return summaries
 
 
 def list_conversations(db: Session, *, user_id: str) -> list[Conversation]:
@@ -206,6 +309,18 @@ def post_message(
     return message
 
 
+def message_to_chat_item(db: Session, message: Message) -> dict:
+    handle, display_name = _sender_identity(db, message.sender_id)
+    return {
+        "id": message.id,
+        "chat_id": message.conversation_id,
+        "sender_handle": handle,
+        "sender_display_name": display_name,
+        "body": message.body,
+        "created_at": message.created_at,
+    }
+
+
 def list_messages(
     db: Session,
     *,
@@ -244,7 +359,20 @@ def list_messages(
     if len(messages) > limit:
         last = items[-1]
         next_cursor = f"{last.created_at.isoformat()}|{last.id}"
-    return {"items": items, "next_cursor": next_cursor}
+    chat_items = []
+    for message in items:
+        handle, display_name = _sender_identity(db, message.sender_id)
+        chat_items.append(
+            {
+                "id": message.id,
+                "chat_id": message.conversation_id,
+                "sender_handle": handle,
+                "sender_display_name": display_name,
+                "body": message.body,
+                "created_at": message.created_at,
+            }
+        )
+    return {"items": chat_items, "next_cursor": next_cursor}
 
 
 def create_group(

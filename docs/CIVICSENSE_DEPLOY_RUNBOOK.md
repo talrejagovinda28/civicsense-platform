@@ -38,4 +38,12 @@ Also verify upgrade-from-008 against a dump of production schema at `008`.
 
 ## Live channels
 
-All `external_channels.enabled=false` by default. Fake/TEST_ONLY adapters only in tests. No WhatsApp/email/API send without per-route verification + citizen consent.
+All `external_channels.enabled=false` by default. Fake/TEST_ONLY adapters only when `ENVIRONMENT` is `test`/`development` **and** `CIVICSENSE_ALLOW_FAKE_ADAPTERS=true`. Production must keep:
+
+```
+ENVIRONMENT=production
+CIVICSENSE_ALLOW_FAKE_ADAPTERS=false
+EXTERNAL_DISPATCH_GLOBAL_ENABLED=false
+```
+
+No WhatsApp/email/API send without per-route verification + citizen consent. Public APIs must not accept `test_scenario`.

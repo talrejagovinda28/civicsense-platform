@@ -1,9 +1,11 @@
 # CivicSense India — Implementation Report
 
-**Date:** 2026-09-22  
+**Date:** 2026-09-22 (updated after PR #1 remediation)  
 **Branch:** `feature/civicsense-accountability-social`  
 **Pack:** `CivicSense_India_E2E_Cursor_Pack_2026-09-22`  
 **Base:** `main` @ `dd9d463` (MapLibre home-map fix)  
+**PR:** https://github.com/talrejagovinda28/civicsense-platform/pull/1  
+**Remediation:** See `docs/PR1_REMEDIATION_REPORT.md`  
 **Production mutations:** None  
 **Live external submissions:** None  
 
@@ -62,13 +64,13 @@
 
 | Command | Result |
 |---------|--------|
-| `py -m pytest tests/ -v` | **7 passed** |
+| `py -m pytest tests/ -v` | **21 passed** (after PR #1 remediation) |
 | `npm run build` (frontend) | **pass** — routes include `/`, `/map`, `/chats`, `/profile` |
 | `npm run lint` | **pass** |
-| `py -m alembic heads` | run in session (expect `009`) |
-| `py scripts/import_research_sources.py --dry-run` | prepares research-only records |
+| `py -m alembic heads` | `009` (head) |
+| Isolated Postgres `008→009` | **UNVERIFIED** (no Docker/Postgres on agent host) |
+| Playwright E2E | **UNVERIFIED** (browser binary unavailable) |
 | Production `alembic upgrade` | **NOT EXECUTED** |
-| Playwright E2E | **NOT EXECUTED** (browser download previously timed out) |
 | Live Clerk/Cloudinary/WhatsApp/email | **NOT EXECUTED** |
 
 ---

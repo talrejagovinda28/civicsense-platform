@@ -4,12 +4,113 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.community import Affected, Comment, Follow, FollowStatus, Like, ModerationStatus, UserBlock
+from app.models.complaint import Complaint
 from app.models.user import DmPolicy, UserProfile
+from app.schemas.social import CommentItem, EngagementCounts
+
+
+def get_engagement_counts(
+    db: Session,
+    *,
+    complaint_id: uuid.UUID,
+    viewer_id: str | None = None,
+) -> EngagementCounts:
+    like_count = int(
+        db.scalar(
+            select(func.count()).select_from(Like).where(Like.complaint_id == complaint_id)
+        )
+        or 0
+    )
+    affected_count = int(
+        db.scalar(
+            select(func.count())
+            .select_from(Affected)
+            .where(Affected.complaint_id == complaint_id)
+        )
+        or 0
+    )
+    comment_count = int(
+        db.scalar(
+            select(func.count())
+            .select_from(Comment)
+            .where(
+                Comment.complaint_id == complaint_id,
+                Comment.deleted_at.is_(None),
+                Comment.moderation_status == ModerationStatus.VISIBLE,
+            )
+        )
+        or 0
+    )
+    viewer_liked = False
+    viewer_affected = False
+    if viewer_id:
+        viewer_liked = (
+            db.scalar(
+                select(Like).where(
+                    Like.user_id == viewer_id,
+                    Like.complaint_id == complaint_id,
+                )
+            )
+            is not None
+        )
+        viewer_affected = (
+            db.scalar(
+                select(Affected).where(
+                    Affected.user_id == viewer_id,
+                    Affected.complaint_id == complaint_id,
+                )
+            )
+            is not None
+        )
+    return EngagementCounts(
+        like_count=like_count,
+        affected_count=affected_count,
+        comment_count=comment_count,
+        viewer_liked=viewer_liked,
+        viewer_affected=viewer_affected,
+    )
+
+
+def _resolve_comment_author(
+    db: Session,
+    *,
+    author_id: str,
+    complaint: Complaint,
+) -> tuple[str, str, bool]:
+    if complaint.anonymous_to_public:
+        return "anonymous", "Citizen", False
+
+    profile = db.scalar(
+        select(UserProfile).where(UserProfile.clerk_user_id == author_id)
+    )
+    if profile is not None:
+        handle = profile.handle or f"user_{author_id[:8]}"
+        display_name = profile.display_name or handle
+        return handle, display_name, profile.official_dm_opt_in
+
+    return f"user_{author_id[:8]}", "Citizen", False
+
+
+def comment_to_item(db: Session, comment: Comment, complaint: Complaint) -> CommentItem:
+    handle, display_name, is_official = _resolve_comment_author(
+        db,
+        author_id=comment.author_id,
+        complaint=complaint,
+    )
+    return CommentItem(
+        id=comment.id,
+        complaint_id=comment.complaint_id,
+        author_handle=handle,
+        author_display_name=display_name,
+        body=comment.body,
+        is_official=is_official,
+        created_at=comment.created_at,
+    )
 
 
 def _is_blocked(db: Session, user_a: str, user_b: str) -> bool:
@@ -97,10 +198,26 @@ def create_comment(
     return comment
 
 
+def count_comments(db: Session, *, complaint_id: uuid.UUID) -> int:
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(Comment)
+            .where(
+                Comment.complaint_id == complaint_id,
+                Comment.deleted_at.is_(None),
+                Comment.moderation_status == ModerationStatus.VISIBLE,
+            )
+        )
+        or 0
+    )
+
+
 def list_comments(
     db: Session,
     *,
     complaint_id: uuid.UUID,
+    skip: int = 0,
     limit: int = 50,
 ) -> list[Comment]:
     return list(
@@ -112,6 +229,7 @@ def list_comments(
                 Comment.moderation_status == ModerationStatus.VISIBLE,
             )
             .order_by(Comment.created_at.asc())
+            .offset(skip)
             .limit(limit)
         )
     )

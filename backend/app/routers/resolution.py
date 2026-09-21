@@ -18,6 +18,14 @@ from app.services import resolution as resolution_service
 router = APIRouter(tags=["resolution"])
 
 
+def _derive_submitter_role(user: ClerkUser) -> str:
+    if user.role == "admin":
+        return "admin"
+    if user.role == "officer":
+        return "officer"
+    return "citizen"
+
+
 @router.post("/complaints/{complaint_id}/resolution-evidence", response_model=EvidenceResponse)
 def submit_resolution_evidence(
     complaint_id: uuid.UUID,
@@ -31,7 +39,7 @@ def submit_resolution_evidence(
             user_id=current_user.user_id,
             complaint_id=complaint_id,
             assertion=payload.assertion,
-            submitter_role=payload.submitter_role,
+            submitter_role=_derive_submitter_role(current_user),
             media_url=payload.media_url,
         )
     )

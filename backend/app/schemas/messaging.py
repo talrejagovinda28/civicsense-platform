@@ -23,18 +23,17 @@ class MessageCreateRequest(BaseModel):
     body: str = Field(min_length=1, max_length=4000)
 
 
-class MessageResponse(BaseModel):
+class ChatMessage(BaseModel):
     id: uuid.UUID
-    conversation_id: uuid.UUID
-    sender_id: str
+    chat_id: uuid.UUID
+    sender_handle: str
+    sender_display_name: str
     body: str
     created_at: datetime
 
-    model_config = {"from_attributes": True}
-
 
 class MessageListResponse(BaseModel):
-    items: list[MessageResponse]
+    items: list[ChatMessage]
     next_cursor: str | None = None
 
 
@@ -43,12 +42,31 @@ class GroupCreateRequest(BaseModel):
     visibility: str = "private"
 
 
+class ChatSummary(BaseModel):
+    id: uuid.UUID
+    title: str
+    kind: str
+    last_message_preview: str | None = None
+    last_message_at: datetime | None = None
+    unread_count: int = 0
+
+
 class ConversationResponse(BaseModel):
     id: uuid.UUID
     type: str
     name: str | None
     created_by: str
     visibility: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class MessageResponse(BaseModel):
+    id: uuid.UUID
+    conversation_id: uuid.UUID
+    sender_id: str
+    body: str
     created_at: datetime
 
     model_config = {"from_attributes": True}

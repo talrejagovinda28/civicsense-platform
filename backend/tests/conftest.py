@@ -4,18 +4,25 @@ import os
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("CLERK_JWKS_URL", "https://example.test/.well-known/jwks.json")
+os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("CIVICSENSE_ALLOW_FAKE_ADAPTERS", "true")
 
 from collections.abc import Generator
 from datetime import UTC, datetime
+from typing import Callable
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.core.deps import get_current_user, get_db, get_optional_user
+from app.core.security import ClerkUser
 from app.db.base import Base
+from app.main import app
 from app.models.authority_channel import ChannelActivation, ChannelMode, ExternalChannel
 from app.models.category import Category
 from app.models.city import City, CityStatus
@@ -99,6 +106,25 @@ def category(db: Session) -> Category:
 
 
 @pytest.fixture
+def sensitive_complaint(db: Session, city: City, category: Category) -> Complaint:
+    row = Complaint(
+        user_id="user_owner",
+        title="Sensitive corruption report",
+        description="Confidential details about bribery",
+        status=ComplaintStatus.SUBMITTED,
+        category_id=category.id,
+        address="Hidden location, Pune",
+        city="Pune",
+        city_id=city.id,
+        is_sensitive=True,
+        public_caption="Sensitive civic issue in Pune",
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+@pytest.fixture
 def complaint(db: Session, city: City, category: Category) -> Complaint:
     row = Complaint(
         user_id="user_owner",
@@ -149,3 +175,32 @@ def consent(db: Session, complaint: Complaint, test_channel: ExternalChannel) ->
     db.add(row)
     db.flush()
     return row
+
+
+@pytest.fixture
+def api_client(db: Session) -> Generator[TestClient, None, None]:
+    def override_get_db() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as client:
+        yield client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def set_api_user(api_client: TestClient) -> Generator[Callable[[ClerkUser | None], None], None, None]:
+    del api_client
+
+    def _set(user: ClerkUser | None) -> None:
+        if user is None:
+            app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides[get_optional_user] = lambda: None
+            return
+
+        app.dependency_overrides[get_current_user] = lambda: user
+        app.dependency_overrides[get_optional_user] = lambda: user
+
+    yield _set
+    app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(get_optional_user, None)

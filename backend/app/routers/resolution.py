@@ -37,6 +37,7 @@ def submit_resolution_evidence(
         resolution_service.submit_evidence(
             db,
             user_id=current_user.user_id,
+            role=current_user.role,
             complaint_id=complaint_id,
             assertion=payload.assertion,
             submitter_role=_derive_submitter_role(current_user),

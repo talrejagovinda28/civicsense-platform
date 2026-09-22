@@ -15,6 +15,7 @@ def submit_evidence(
     db: Session,
     *,
     user_id: str,
+    role: str,
     complaint_id: uuid.UUID,
     assertion: str,
     submitter_role: str,
@@ -23,6 +24,13 @@ def submit_evidence(
     complaint = db.get(Complaint, complaint_id)
     if complaint is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Complaint not found")
+
+    assert_complaint_case_access(db, complaint, user_id, role)
+    if role not in {"officer", "admin"} and complaint.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the reporter or officers may submit resolution evidence",
+        )
 
     evidence = ResolutionEvidence(
         complaint_id=complaint_id,
@@ -96,11 +104,34 @@ def independent_review(
             detail="Reporter cannot independently verify own case",
         )
 
-    if decision == "verified_resolved" and reviewer_role == "officer" and evidence_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Officers must provide evidence_id to verify resolution",
-        )
+    if decision == "verified_resolved" and reviewer_role == "officer":
+        if evidence_id is None:
+            # Prefer the newest evidence not authored by the reviewing officer.
+            candidates = (
+                db.query(ResolutionEvidence)
+                .filter(
+                    ResolutionEvidence.complaint_id == complaint_id,
+                    ResolutionEvidence.submitter_id != reviewer_id,
+                )
+                .order_by(ResolutionEvidence.created_at.desc())
+                .all()
+            )
+            if not candidates:
+                any_evidence = (
+                    db.query(ResolutionEvidence)
+                    .filter(ResolutionEvidence.complaint_id == complaint_id)
+                    .count()
+                )
+                if any_evidence == 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail="Officers must provide evidence_id to verify resolution",
+                    )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Officer cannot independently verify own fix evidence",
+                )
+            evidence_id = candidates[0].id
 
     evidence: ResolutionEvidence | None = None
     if evidence_id is not None:

@@ -102,7 +102,8 @@
 | `npm run lint` | **pass** |
 | `npm run build` | **pass** |
 | Isolated PostgreSQL `008→009` | **VERIFIED** on local disposable DB `civicsense_mig_test` (PostgreSQL 16.15 @ 127.0.0.1) — not Supabase/production |
-| Playwright browser E2E | **3/3 smoke passed** (home/map/wizard shell). Signed-in journey **UNVERIFIED** — Clerk returned `host_invalid` on this agent host without allowed localhost attribution / test user. |
+| Playwright browser E2E | **3/3 smoke passed** earlier (home/map/wizard shell). Signed-in journey **UNVERIFIED**. Clerk proxy now disabled unless `NEXT_PUBLIC_CLERK_PROXY_URL` is set (fixes local `host_invalid`). |
+| Production backup | **NOT VERIFIED** — interactive scripts prepared under `Desktop\CivicSense-Private-Backups`; user must run dump + verify before merge |
 | Production migration | **NOT RUN** (hard boundary) |
 | Live government dispatch | **NOT ENABLED** |
 

@@ -3,53 +3,53 @@
 **Branch:** `feature/civicsense-accountability-social`  
 **Alembic:** `001` → `008` → **`009`** (India social/accountability additive)
 
-## Critical warning
+## Critical warning — Railway pre-deploy
 
-Railway `railway.toml` currently starts **uvicorn only**. If any Railway **pre-deploy** command runs `python -m alembic upgrade head`, merging this branch **will apply `009` to production automatically**. Review Railway service settings before merge. This build does **not** apply production migrations.
+Production backend currently has a **Railway dashboard** pre-deploy / release command:
 
-## Isolated dry-run (required before production)
-
-```powershell
-# Point at a disposable Postgres clone (NOT production)
-$env:DATABASE_URL = "postgresql+psycopg://...isolated..."
-Set-Location backend
-py -m alembic heads          # expect: 009 (head)
-py -m alembic history        # expect linear 001..009
-py -m alembic upgrade head   # from empty OR from 008
-py -m alembic current
+```text
+python -m alembic upgrade head
 ```
 
-Also verify upgrade-from-008 against a dump of production schema at `008`.
+Repo `backend/railway.toml` start command is **uvicorn only**, but the **dashboard pre-deploy overrides** that and will apply `009` on the next deploy of this branch.
 
-### Verified (2026-09-23) — disposable local Postgres only
+### Safe release sequence (required)
 
-Ran on agent host against **PostgreSQL 16.15** database `civicsense_mig_test` (not Supabase, not production):
+1. **Verified production backup** using `Desktop\CivicSense-Private-Backups` scripts (`VERIFY_OK`).
+2. In Railway → Backend service → Settings → Deploy:
+   - **Temporarily clear / disable** the pre-deploy command `python -m alembic upgrade head`
+     (or replace with a no-op) so merge/deploy does **not** auto-migrate.
+3. Deploy backend code **without** migrating.
+4. Human reviews migration `009` + backup restore drill.
+5. Manually run once (Railway shell or approved one-off), only after backup:
+   `python -m alembic upgrade head`
+6. Confirm `alembic_version` = `009` and smoke `/api/v1/health`.
+7. Only then re-enable auto-migrate if the team explicitly wants it (optional; prefer manual).
 
-```
-alembic upgrade 008   → current 008
-alembic upgrade head  → current 009 (head)
-```
+Do **not** alter Railway from this agent. Do **not** migrate production without the verified backup.
 
-41 relations present including `user_profiles`, `submission_*`, `resolution_*`, `feed_events`, etc. Drop the disposable DB after review.
+## Isolated dry-run (already done on agent host)
+
+Disposable local Postgres `civicsense_mig_test` (dropped after): `008 → 009` succeeded. Not Supabase.
 
 ## Production apply sequence (human)
 
-1. Backup Supabase.
-2. Merge/deploy only after PR review.
-3. Confirm Railway does **or does not** auto-migrate; apply `alembic upgrade head` once accordingly.
-4. Deploy backend, then frontend.
-5. Smoke: `/api/v1/health`, `/api/v1/feed?city=pune`, `/map`, create complaint (no live channel).
-6. Keep `EXTERNAL_DISPATCH_GLOBAL_ENABLED=false` until channel matrix approved.
+1. Backup Supabase (private folder scripts).
+2. Disable Railway auto-migrate as above.
+3. Merge/deploy only after PR review + backup VERIFY_OK.
+4. Manual `alembic upgrade head` once.
+5. Deploy frontend.
+6. Smoke: `/api/v1/health`, `/api/v1/feed?city=pune`, `/map`, signed-in report (Clerk).
+7. Keep dispatch flags false (below).
 
 ## Rollback
 
 - Prefer code rollback + leave additive schema (safe).
-- Destructive `downgrade` of `009` only on clones; drops many tables — not recommended on production with user data.
-- Reconcile any `submission_intents` in `UNKNOWN_OUTCOME` before re-enabling dispatch.
+- Destructive `downgrade` of `009` only on clones.
 
-## Live channels
+## Live channels / safety flags
 
-All `external_channels.enabled=false` by default. Fake/TEST_ONLY adapters only when `ENVIRONMENT` is `test`/`development` **and** `CIVICSENSE_ALLOW_FAKE_ADAPTERS=true`. Production must keep:
+Production must keep:
 
 ```
 ENVIRONMENT=production
@@ -57,4 +57,6 @@ CIVICSENSE_ALLOW_FAKE_ADAPTERS=false
 EXTERNAL_DISPATCH_GLOBAL_ENABLED=false
 ```
 
-No WhatsApp/email/API send without per-route verification + citizen consent. Public APIs must not accept `test_scenario`.
+Optional: `CLERK_ISSUER=https://<your-clerk-slug>.clerk.accounts.dev` to pin JWT issuer.
+
+No WhatsApp/email/API send without per-route verification + citizen consent.

@@ -14,6 +14,16 @@ logger = logging.getLogger(__name__)
 APP_NAME = "CivicSense"
 APP_VERSION = "0.1.0"
 
+if settings.ENVIRONMENT.lower() == "production":
+    if settings.EXTERNAL_DISPATCH_GLOBAL_ENABLED:
+        logger.error(
+            "EXTERNAL_DISPATCH_GLOBAL_ENABLED=true in production — live outbound must stay off until approved"
+        )
+    if settings.CIVICSENSE_ALLOW_FAKE_ADAPTERS:
+        logger.error(
+            "CIVICSENSE_ALLOW_FAKE_ADAPTERS=true in production — fake adapters must stay disabled"
+        )
+
 app = FastAPI(title=APP_NAME, version=APP_VERSION)
 
 app.add_middleware(

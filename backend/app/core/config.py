@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "production"
     CIVICSENSE_ALLOW_FAKE_ADAPTERS: bool = False
     EXTERNAL_DISPATCH_GLOBAL_ENABLED: bool = False
+    # Optional: pin JWT issuer to this Clerk Frontend API URL (recommended in production)
+    CLERK_ISSUER: str = ""
 
     @property
     def fake_adapters_allowed(self) -> bool:

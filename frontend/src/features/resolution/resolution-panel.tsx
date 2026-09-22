@@ -227,6 +227,11 @@ export function ResolutionPanel({
           }}
         >
           <p className="text-sm font-medium text-civic-navy">Officer review</p>
+          <p className="text-xs text-[var(--muted)]">
+            Verified resolved requires resolution evidence submitted by someone other
+            than the reviewing officer. CivicSense never marks government filing as
+            official without authentic confirmation.
+          </p>
           <label className="block text-sm font-medium">
             Decision
             <select

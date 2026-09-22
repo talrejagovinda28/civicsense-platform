@@ -56,11 +56,16 @@ class ReconcileRequest(BaseModel):
     determination: str = Field(pattern="^(sent|not_sent)$")
 
 
+class VerifyReferenceRequest(BaseModel):
+    reference_id: uuid.UUID
+
+
 class ExternalReferenceResponse(BaseModel):
     id: uuid.UUID
     reference_value: str
     reference_type: str
     tracking_url: str | None
+    verified_at: datetime | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

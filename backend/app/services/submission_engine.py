@@ -92,6 +92,8 @@ def _append_timeline(
     event_type: str,
     public_payload: dict | None = None,
     idempotency_key: str | None = None,
+    authenticity_level: str = TimelineAuthenticityLevel.SYSTEM_DERIVED,
+    visibility: str = TimelineVisibility.OWNER,
 ) -> None:
     db.add(
         ComplaintTimelineEvent(
@@ -99,9 +101,9 @@ def _append_timeline(
             actor_id=actor_id,
             actor_kind=actor_kind,
             event_type=event_type,
-            authenticity_level=TimelineAuthenticityLevel.SYSTEM_DERIVED,
+            authenticity_level=authenticity_level,
             public_payload_redacted=json.dumps(public_payload) if public_payload else None,
-            visibility=TimelineVisibility.OWNER,
+            visibility=visibility,
             idempotency_key=idempotency_key,
             created_at=datetime.now(UTC),
         )
@@ -212,34 +214,36 @@ def create_intent_and_dispatch(
     is_guided = mode in {ChannelMode.GUIDED_PORTAL, ChannelMode.GUIDED_WHATSAPP}
     test_scenario = _test_scenario if settings.fake_adapters_allowed else None
 
-    if activation == ChannelActivation.DISABLED:
-        return {
-            "code": "CHANNEL_NOT_ENABLED",
-            "message": "Channel is disabled",
-            "status": IntentStatus.FAILED,
-        }
+    _not_enabled = {
+        "code": "CHANNEL_NOT_ENABLED",
+        "message": "Channel is not enabled for dispatch",
+        "status": IntentStatus.FAILED,
+    }
 
-    if not is_guided:
-        if activation == ChannelActivation.TEST_ONLY:
-            if not settings.fake_adapters_allowed:
-                return {
-                    "code": "CHANNEL_NOT_ENABLED",
-                    "message": "Channel is not enabled for dispatch",
-                    "status": IntentStatus.FAILED,
-                }
-        elif activation in {ChannelActivation.AUTOMATED, ChannelActivation.LIVE_APPROVED}:
-            if not (channel.enabled and settings.EXTERNAL_DISPATCH_GLOBAL_ENABLED):
-                return {
-                    "code": "CHANNEL_NOT_ENABLED",
-                    "message": "Channel is not enabled for live dispatch",
-                    "status": IntentStatus.FAILED,
-                }
-        else:
+    if activation == ChannelActivation.DISABLED:
+        return {**_not_enabled, "message": "Channel is disabled"}
+
+    if is_guided:
+        if not channel.enabled:
+            return _not_enabled
+        if activation not in {
+            ChannelActivation.MANUAL,
+            ChannelActivation.LIVE_APPROVED,
+        }:
+            return _not_enabled
+    elif activation == ChannelActivation.TEST_ONLY:
+        if not settings.fake_adapters_allowed:
+            return _not_enabled
+    elif activation in {ChannelActivation.AUTOMATED, ChannelActivation.LIVE_APPROVED}:
+        if not settings.EXTERNAL_DISPATCH_GLOBAL_ENABLED:
             return {
-                "code": "CHANNEL_NOT_ENABLED",
-                "message": "Channel is not enabled for dispatch",
-                "status": IntentStatus.FAILED,
+                **_not_enabled,
+                "message": "Channel is not enabled for live dispatch",
             }
+    elif activation == ChannelActivation.MANUAL:
+        pass
+    else:
+        return _not_enabled
 
     intent = SubmissionIntent(
         complaint_id=complaint_id,
@@ -362,13 +366,22 @@ def attest_sent(
         )
 
     intent.status = IntentStatus.ACK_PENDING
+    payload: dict = {
+        "user_reported": True,
+        "registered": False,
+        "note": "User-reported send attestation; not officially registered",
+    }
+    if attestation_note:
+        payload["attestation_note"] = attestation_note
     _append_timeline(
         db,
         complaint_id=intent.complaint_id,
         actor_id=user_id,
         actor_kind=TimelineActorKind.CITIZEN,
         event_type="user_reported_sent",
-        public_payload={"note": attestation_note} if attestation_note else None,
+        public_payload=payload,
+        authenticity_level=TimelineAuthenticityLevel.USER_ASSERTED,
+        visibility=TimelineVisibility.PUBLIC,
     )
     db.commit()
     db.refresh(intent)
@@ -384,6 +397,8 @@ def attach_reference(
     reference_type: str = "official_token",
     tracking_url: str | None = None,
 ) -> ExternalReference:
+    """Store a citizen-provided reference; never treated as verified registration."""
+    del reference_type  # client cannot claim official authenticity
     intent = db.get(SubmissionIntent, intent_id)
     if intent is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Intent not found")
@@ -396,8 +411,9 @@ def attach_reference(
         complaint_id=intent.complaint_id,
         intent_id=intent.id,
         reference_value=reference_value.strip(),
-        reference_type=reference_type,
+        reference_type="user_provided_unverified",
         tracking_url=tracking_url,
+        verified_at=None,
     )
     db.add(ref)
     _append_timeline(
@@ -405,8 +421,45 @@ def attach_reference(
         complaint_id=intent.complaint_id,
         actor_id=user_id,
         actor_kind=TimelineActorKind.CITIZEN,
-        event_type="user_provided_reference",
-        public_payload={"reference_type": reference_type},
+        event_type="user_provided_unverified_reference",
+        public_payload={
+            "reference_type": "user_provided_unverified",
+            "verified": False,
+            "note": "User-reported reference; not verified by CivicSense",
+        },
+        authenticity_level=TimelineAuthenticityLevel.USER_ASSERTED,
+        visibility=TimelineVisibility.PUBLIC,
+    )
+    db.commit()
+    db.refresh(ref)
+    return ref
+
+
+def verify_reference(
+    db: Session,
+    *,
+    admin_user_id: str,
+    intent_id: uuid.UUID,
+    reference_id: uuid.UUID,
+) -> ExternalReference:
+    intent = db.get(SubmissionIntent, intent_id)
+    if intent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Intent not found")
+
+    ref = db.get(ExternalReference, reference_id)
+    if ref is None or ref.intent_id != intent.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reference not found")
+
+    ref.verified_at = datetime.now(UTC)
+    _append_timeline(
+        db,
+        complaint_id=intent.complaint_id,
+        actor_id=admin_user_id,
+        actor_kind=TimelineActorKind.OFFICER,
+        event_type="reference_verified_by_admin",
+        public_payload={"reference_id": str(reference_id), "verified": True},
+        authenticity_level=TimelineAuthenticityLevel.VERIFIED,
+        visibility=TimelineVisibility.PUBLIC,
     )
     db.commit()
     db.refresh(ref)

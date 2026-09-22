@@ -21,6 +21,17 @@ py -m alembic current
 
 Also verify upgrade-from-008 against a dump of production schema at `008`.
 
+### Verified (2026-09-23) — disposable local Postgres only
+
+Ran on agent host against **PostgreSQL 16.15** database `civicsense_mig_test` (not Supabase, not production):
+
+```
+alembic upgrade 008   → current 008
+alembic upgrade head  → current 009 (head)
+```
+
+41 relations present including `user_profiles`, `submission_*`, `resolution_*`, `feed_events`, etc. Drop the disposable DB after review.
+
 ## Production apply sequence (human)
 
 1. Backup Supabase.

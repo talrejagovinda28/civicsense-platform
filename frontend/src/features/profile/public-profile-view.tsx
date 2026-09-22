@@ -3,10 +3,17 @@
 import { useAuth } from "@clerk/nextjs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { AppShell } from "@/features/shell/app-shell";
-import { followProfile, getPublicProfile, unfollowProfile } from "@/lib/api";
+import {
+  createDirectChat,
+  followProfile,
+  getPublicProfile,
+  getReputation,
+  unfollowProfile,
+} from "@/lib/api";
 
 type PublicProfileViewProps = {
   handle: string;
@@ -15,7 +22,9 @@ type PublicProfileViewProps = {
 export function PublicProfileView({ handle }: PublicProfileViewProps) {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const queryClient = useQueryClient();
+  const router = useRouter();
   const [followError, setFollowError] = useState<string | null>(null);
+  const [messageError, setMessageError] = useState<string | null>(null);
 
   const profileQuery = useQuery({
     queryKey: ["profile", handle],
@@ -24,6 +33,45 @@ export function PublicProfileView({ handle }: PublicProfileViewProps) {
       return getPublicProfile(handle, token);
     },
     enabled: isLoaded,
+  });
+
+  const reputationQuery = useQuery({
+    queryKey: ["reputation-me"],
+    queryFn: async () => {
+      const token = await getToken();
+      if (!token) {
+        return null;
+      }
+      return getReputation(token);
+    },
+    enabled: isLoaded && isSignedIn,
+  });
+
+  const messageMutation = useMutation({
+    mutationFn: async () => {
+      const token = await getToken();
+      const profile = profileQuery.data;
+      const recipientId = profile?.messaging_user_id;
+      if (!token || !recipientId) {
+        throw new Error("Messaging is not available for this profile.");
+      }
+      const result = await createDirectChat(token, recipientId);
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
+      return result.data!;
+    },
+    onSuccess: (data) => {
+      setMessageError(null);
+      if (data.conversation_id) {
+        router.push(`/chats/${data.conversation_id}`);
+      } else if (data.request_id) {
+        setMessageError("Message request sent — waiting for acceptance.");
+      }
+    },
+    onError: (error) => {
+      setMessageError(error instanceof Error ? error.message : "Could not start chat.");
+    },
   });
 
   const followMutation = useMutation({
@@ -82,18 +130,31 @@ export function PublicProfileView({ handle }: PublicProfileViewProps) {
                 )}
               </div>
               {isSignedIn && (
-                <button
-                  type="button"
-                  onClick={() => followMutation.mutate()}
-                  disabled={followMutation.isPending}
-                  className="rounded-lg border border-civic px-4 py-2 text-sm font-medium text-civic-navy disabled:opacity-40"
-                >
-                  {profileQuery.data.viewer_is_following
-                    ? "Unfollow"
-                    : profileQuery.data.viewer_follow_pending
-                      ? "Requested"
-                      : "Follow"}
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => followMutation.mutate()}
+                    disabled={followMutation.isPending}
+                    className="rounded-lg border border-civic px-4 py-2 text-sm font-medium text-civic-navy disabled:opacity-40"
+                  >
+                    {profileQuery.data.viewer_is_following
+                      ? "Unfollow"
+                      : profileQuery.data.viewer_follow_pending
+                        ? "Requested"
+                        : "Follow"}
+                  </button>
+                  {profileQuery.data.messaging_user_id &&
+                    reputationQuery.data?.unlocks.can_initiate_dm && (
+                      <button
+                        type="button"
+                        onClick={() => messageMutation.mutate()}
+                        disabled={messageMutation.isPending}
+                        className="rounded-lg bg-civic-navy px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
+                      >
+                        {messageMutation.isPending ? "Opening…" : "Message"}
+                      </button>
+                    )}
+                </div>
               )}
             </div>
 
@@ -117,6 +178,7 @@ export function PublicProfileView({ handle }: PublicProfileViewProps) {
             </dl>
 
             {followError && <p className="mt-3 text-sm text-red-600">{followError}</p>}
+            {messageError && <p className="mt-3 text-sm text-amber-700">{messageError}</p>}
           </section>
         )}
       </div>

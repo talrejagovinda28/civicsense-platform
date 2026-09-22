@@ -11,7 +11,8 @@ from app.core.deps import (
     get_optional_user,
     require_officer_or_admin,
 )
-from app.services.access import can_view_sensitive_complaint, is_privileged_role
+from app.models.complaint_image import MediaVisibility
+from app.services.access import assert_complaint_case_access, is_privileged_role
 from app.core.security import ClerkUser
 from app.models.category import Category
 from app.models.city import City
@@ -32,12 +33,18 @@ from app.schemas.external_submission import (
     ExternalSubmissionStartRequest,
     ExternalSubmissionTokenRequest,
 )
+from app.schemas.timeline import TimelineEventResponse, TimelineListResponse
 from app.services.complaints import (
     create_complaint,
     suggest_category,
     update_complaint_status,
 )
-from app.services.external_submissions import save_external_token, start_external_handoff
+from app.services.external_submissions import (
+    save_external_token,
+    start_external_handoff,
+    to_external_submission_response,
+)
+from app.services.timeline import list_timeline_events
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/complaints", tags=["complaints"])
@@ -52,7 +59,19 @@ def _truncate(text: str, max_length: int = DESCRIPTION_PREVIEW_LENGTH) -> str:
     return text[: max_length - 3].rstrip() + "..."
 
 
-def _to_feed_item(complaint: Complaint, *, truncate: bool) -> ComplaintFeedItem:
+def _visible_images(complaint: Complaint, *, full_access: bool) -> list:
+    images = sorted(complaint.images, key=lambda image: image.sort_order)
+    if full_access:
+        return images
+    return [image for image in images if image.visibility == MediaVisibility.PUBLIC]
+
+
+def _to_feed_item(
+    complaint: Complaint,
+    *,
+    truncate: bool,
+    full_access: bool = False,
+) -> ComplaintFeedItem:
     description = (
         _truncate(complaint.description) if truncate else complaint.description
     )
@@ -64,7 +83,7 @@ def _to_feed_item(complaint: Complaint, *, truncate: bool) -> ComplaintFeedItem:
         category=complaint.category,
         ward=complaint.ward,
         city=complaint.city,
-        images=sorted(complaint.images, key=lambda image: image.sort_order),
+        images=_visible_images(complaint, full_access=full_access),
         created_at=complaint.created_at,
         public_latitude=complaint.public_latitude,
         public_longitude=complaint.public_longitude,
@@ -127,7 +146,7 @@ def _to_detail(complaint: Complaint, user: ClerkUser | None) -> ComplaintDetail:
         category=complaint.category,
         ward=complaint.ward,
         city=complaint.city,
-        images=sorted(complaint.images, key=lambda image: image.sort_order),
+        images=_visible_images(complaint, full_access=full_access),
         created_at=complaint.created_at,
         updated_at=complaint.updated_at,
         address=complaint.address if full_access else None,
@@ -151,7 +170,7 @@ def _to_detail(complaint: Complaint, user: ClerkUser | None) -> ComplaintDetail:
         public_latitude=complaint.public_latitude,
         public_longitude=complaint.public_longitude,
         external_submission=(
-            ExternalSubmissionResponse.model_validate(complaint.external_submission)
+            to_external_submission_response(complaint.external_submission)
             if complaint.external_submission
             else None
         ),
@@ -261,7 +280,7 @@ def list_my_complaints(
     complaints = db.scalars(stmt).unique().all()
 
     logger.info("User %s listed %d complaints", current_user.user_id, len(complaints))
-    return [_to_feed_item(c, truncate=False) for c in complaints]
+    return [_to_feed_item(c, truncate=False, full_access=True) for c in complaints]
 
 
 @router.get("/officer/queue", response_model=list[ComplaintFeedItem])
@@ -281,7 +300,7 @@ def list_officer_queue(
     )
     complaints = db.scalars(stmt).unique().all()
     logger.info("Officer queue: %d open complaints (city=%s)", len(complaints), city)
-    return [_to_feed_item(c, truncate=False) for c in complaints]
+    return [_to_feed_item(c, truncate=False, full_access=True) for c in complaints]
 
 
 @router.post("/suggest-category", response_model=SuggestCategoryResponse)
@@ -319,12 +338,28 @@ def get_complaint(
     complaint = _get_complaint_or_404(db, complaint_id)
     viewer_id = current_user.user_id if current_user else None
     viewer_role = current_user.role if current_user else None
-    if not can_view_sensitive_complaint(complaint, viewer_id, viewer_role):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Complaint not found",
-        )
+    assert_complaint_case_access(db, complaint, viewer_id, viewer_role)
     return _to_detail(complaint, current_user)
+
+
+@router.get("/{complaint_id}/timeline", response_model=TimelineListResponse)
+def get_complaint_timeline(
+    complaint_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: ClerkUser | None = Depends(get_optional_user),
+) -> TimelineListResponse:
+    complaint = _get_complaint_or_404(db, complaint_id)
+    viewer_id = current_user.user_id if current_user else None
+    viewer_role = current_user.role if current_user else None
+    items = list_timeline_events(
+        db,
+        complaint=complaint,
+        user_id=viewer_id,
+        role=viewer_role,
+    )
+    return TimelineListResponse(
+        items=[TimelineEventResponse(**item) for item in items],
+    )
 
 
 @router.patch("/{complaint_id}/status", response_model=ComplaintDetail)
@@ -352,7 +387,7 @@ def start_external_submission_endpoint(
 ) -> ExternalSubmissionResponse:
     complaint = _get_complaint_or_404(db, complaint_id)
     record = start_external_handoff(db, complaint, current_user, payload)
-    return record
+    return to_external_submission_response(record)
 
 
 @router.patch(
@@ -367,4 +402,4 @@ def save_external_submission_token_endpoint(
 ) -> ExternalSubmissionResponse:
     complaint = _get_complaint_or_404(db, complaint_id)
     record = save_external_token(db, complaint, current_user, payload)
-    return record
+    return to_external_submission_response(record)

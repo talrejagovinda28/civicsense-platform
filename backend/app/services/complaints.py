@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.security import ClerkUser
 from app.models.category import Category
 from app.models.complaint import Complaint, ComplaintStatus
-from app.models.complaint_image import ComplaintImage
+from app.models.complaint_image import ComplaintImage, MediaVisibility
 from app.models.complaint_status_history import ComplaintStatusHistory
 from app.schemas.complaint_create import (
     ComplaintCreate,
@@ -249,14 +249,21 @@ def create_complaint(
         department_id=jurisdiction["department_id"],
         public_latitude=public_latitude,
         public_longitude=public_longitude,
+        is_sensitive=payload.is_sensitive,
+        anonymous_to_public=payload.anonymous_to_public,
+        public_caption=payload.public_caption,
     )
 
+    image_visibility = (
+        MediaVisibility.PRIVATE if payload.is_sensitive else MediaVisibility.PUBLIC
+    )
     for image in payload.images:
         complaint.images.append(
             ComplaintImage(
                 cloudinary_url=image.cloudinary_url,
                 cloudinary_public_id=image.cloudinary_public_id,
                 sort_order=image.sort_order,
+                visibility=image_visibility,
             )
         )
 

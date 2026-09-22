@@ -30,5 +30,7 @@ export function buildCreateComplaintPayload(
       cloudinary_public_id: image.cloudinaryPublicId,
       sort_order: image.sortOrder,
     })),
+    anonymous_to_public: draft.anonymousToPublic,
+    is_sensitive: draft.isSensitive,
   };
 }

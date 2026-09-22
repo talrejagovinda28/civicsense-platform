@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.complaint import Complaint, VerificationState
 from app.models.resolution import ResolutionEvidence, ResolutionEvidenceStatus, ResolutionReview
+from app.services.access import assert_complaint_case_access
 from app.services.reputation import EVIDENCE_XP, RESOLUTION_XP, grant_xp
 
 
@@ -87,10 +88,18 @@ def independent_review(
     if complaint is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Complaint not found")
 
+    assert_complaint_case_access(db, complaint, reviewer_id, reviewer_role)
+
     if reviewer_role != "admin" and complaint.user_id == reviewer_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Reporter cannot independently verify own case",
+        )
+
+    if decision == "verified_resolved" and reviewer_role == "officer" and evidence_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Officers must provide evidence_id to verify resolution",
         )
 
     evidence: ResolutionEvidence | None = None

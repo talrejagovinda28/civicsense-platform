@@ -6,7 +6,9 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { AccountabilityCard } from "@/features/accountability/accountability-card";
-import { OfficialHandoffCard } from "@/features/routing/official-handoff-card";
+import { ComplaintTimeline } from "@/features/complaints/complaint-timeline";
+import { ResolutionPanel } from "@/features/resolution/resolution-panel";
+import { OfficialSubmissionCard } from "@/features/submissions/official-submission-card";
 import { CommentsSection } from "@/features/social/comments-section";
 import { EngagementBar } from "@/features/social/engagement-bar";
 import {
@@ -27,7 +29,7 @@ type ComplaintDetailViewProps = {
 };
 
 export function ComplaintDetailView({ complaintId }: ComplaintDetailViewProps) {
-  const { getToken, isLoaded } = useAuth();
+  const { getToken, isLoaded, userId } = useAuth();
   const queryClient = useQueryClient();
   const [selectedStatus, setSelectedStatus] = useState("");
   const [note, setNote] = useState("");
@@ -99,6 +101,12 @@ export function ComplaintDetailView({ complaintId }: ComplaintDetailViewProps) {
   const complaint = complaintQuery.data;
   const role = meQuery.data?.role ?? "citizen";
   const canUpdateStatus = role === "officer" || role === "admin";
+  const isOfficer = role === "officer" || role === "admin";
+  const isOwner =
+    complaint.viewer_is_owner ??
+    (complaint.user_id !== undefined &&
+      complaint.user_id !== null &&
+      (complaint.user_id === userId || complaint.user_id === meQuery.data?.user_id));
   const nextStatuses = getNextStatusOptions(complaint.status, role);
 
   const mapLat = complaint.public_latitude ?? complaint.latitude ?? null;
@@ -120,6 +128,8 @@ export function ComplaintDetailView({ complaintId }: ComplaintDetailViewProps) {
         engagement={engagement}
         engagementUnavailable={engagementQuery.data === null && !engagementQuery.isLoading}
         canUpdateStatus={canUpdateStatus}
+        isOwner={isOwner}
+        isOfficer={isOfficer}
         nextStatuses={nextStatuses}
         selectedStatus={selectedStatus}
         note={note}
@@ -137,7 +147,7 @@ export function ComplaintDetailView({ complaintId }: ComplaintDetailViewProps) {
           longitude={mapLng}
           categoryId={complaint.category.id}
         />
-        <OfficialHandoffCard complaint={complaint} />
+        <OfficialSubmissionCard complaint={complaint} />
       </aside>
     </div>
   );
@@ -148,6 +158,8 @@ function ComplaintDetailContent({
   engagement,
   engagementUnavailable,
   canUpdateStatus,
+  isOwner,
+  isOfficer,
   nextStatuses,
   selectedStatus,
   note,
@@ -161,6 +173,8 @@ function ComplaintDetailContent({
   engagement: EngagementCounts;
   engagementUnavailable: boolean;
   canUpdateStatus: boolean;
+  isOwner: boolean;
+  isOfficer: boolean;
   nextStatuses: { value: string; label: string }[];
   selectedStatus: string;
   note: string;
@@ -215,27 +229,9 @@ function ComplaintDetailContent({
 
       <CommentsSection complaintId={complaint.id} />
 
-      <section>
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
-          Status Timeline
-        </h3>
-        <ol className="mt-4 space-y-4 border-l border-civic pl-4">
-          {(complaint.status_history ?? []).map((entry) => (
-            <li key={entry.id} className="relative">
-              <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-[var(--primary)]" />
-              <p className="text-sm font-medium">
-                {STATUS_LABELS[entry.status] ?? entry.status}
-              </p>
-              {entry.note && (
-                <p className="mt-1 text-sm text-[var(--muted)]">{entry.note}</p>
-              )}
-              <p className="mt-1 text-xs text-[var(--muted)]">
-                {new Date(entry.created_at).toLocaleString()}
-              </p>
-            </li>
-          ))}
-        </ol>
-      </section>
+      <ComplaintTimeline complaint={complaint} />
+
+      <ResolutionPanel complaint={complaint} isOwner={isOwner} isOfficer={isOfficer} />
 
       {canUpdateStatus && nextStatuses.length > 0 && (
         <section className="rounded-xl border border-civic bg-[var(--surface-muted)] p-4">

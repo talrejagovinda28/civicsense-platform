@@ -13,13 +13,24 @@ class ChannelNotEnabled(Exception):
         super().__init__(message)
 
 
+def _guided_channel_enabled(channel: ExternalChannel) -> bool:
+    activation = ChannelActivation(channel.activation)
+    if activation == ChannelActivation.DISABLED or not channel.enabled:
+        return False
+    return activation in {ChannelActivation.MANUAL, ChannelActivation.LIVE_APPROVED}
+
+
 def get_adapter(channel: ExternalChannel) -> SubmissionAdapter:
     mode = ChannelMode(channel.mode)
     activation = ChannelActivation(channel.activation)
 
-    if mode == ChannelMode.GUIDED_PORTAL:
-        return GuidedPortalAdapter()
-    if mode == ChannelMode.GUIDED_WHATSAPP:
+    if mode in {ChannelMode.GUIDED_PORTAL, ChannelMode.GUIDED_WHATSAPP}:
+        if not _guided_channel_enabled(channel):
+            raise ChannelNotEnabled(
+                f"Guided channel {channel.id} is not enabled (activation={activation.value})"
+            )
+        if mode == ChannelMode.GUIDED_PORTAL:
+            return GuidedPortalAdapter()
         return GuidedWhatsAppAdapter()
 
     if activation == ChannelActivation.TEST_ONLY and settings.fake_adapters_allowed:

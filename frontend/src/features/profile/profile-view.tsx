@@ -5,7 +5,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { AppShell } from "@/features/shell/app-shell";
-import { getOwnProfile, getReputation, updateOwnProfile } from "@/lib/api";
+import {
+  decideFollowRequest,
+  getOwnProfile,
+  getPendingFollowRequests,
+  getReputation,
+  updateOwnProfile,
+} from "@/lib/api";
 
 export function ProfileView() {
   const { getToken, isLoaded } = useAuth();
@@ -22,6 +28,39 @@ export function ProfileView() {
       return getOwnProfile(token);
     },
     enabled: isLoaded,
+  });
+
+  const followRequestsQuery = useQuery({
+    queryKey: ["follow-requests-me"],
+    queryFn: async () => {
+      const token = await getToken();
+      if (!token) {
+        return [];
+      }
+      return getPendingFollowRequests(token);
+    },
+    enabled: isLoaded,
+  });
+
+  const decideFollowMutation = useMutation({
+    mutationFn: async ({ followId, accept }: { followId: string; accept: boolean }) => {
+      const token = await getToken();
+      if (!token) {
+        throw new Error("Not signed in.");
+      }
+      const result = await decideFollowRequest(token, followId, accept);
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
+      return result.data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["follow-requests-me"] });
+      setSaveError(null);
+    },
+    onError: (error) => {
+      setSaveError(error instanceof Error ? error.message : "Could not update request.");
+    },
   });
 
   const reputationQuery = useQuery({
@@ -79,6 +118,49 @@ export function ProfileView() {
             Profile API is not available yet. Privacy and reputation settings will appear
             when the backend is deployed.
           </p>
+        )}
+
+        {(followRequestsQuery.data?.length ?? 0) > 0 && (
+          <section className="rounded-xl border border-civic bg-[var(--surface)] p-5 shadow-civic-sm">
+            <h2 className="font-semibold text-civic-navy">Follow requests</h2>
+            <ul className="mt-4 space-y-3">
+              {followRequestsQuery.data?.map((request) => (
+                <li
+                  key={request.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-civic px-3 py-2"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-civic-navy">
+                      {request.follower_display_name}
+                    </p>
+                    <p className="text-xs text-[var(--muted)]">@{request.follower_handle}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={decideFollowMutation.isPending}
+                      onClick={() =>
+                        decideFollowMutation.mutate({ followId: request.id, accept: true })
+                      }
+                      className="rounded-lg bg-civic-navy px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                    >
+                      Accept
+                    </button>
+                    <button
+                      type="button"
+                      disabled={decideFollowMutation.isPending}
+                      onClick={() =>
+                        decideFollowMutation.mutate({ followId: request.id, accept: false })
+                      }
+                      className="rounded-lg border border-civic px-3 py-1.5 text-xs font-medium text-civic-navy disabled:opacity-50"
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
 
         {profileQuery.data && (

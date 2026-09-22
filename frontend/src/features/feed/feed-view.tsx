@@ -3,11 +3,11 @@
 import { useAuth } from "@clerk/nextjs";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 
 import { useCity } from "@/features/cities/city-context";
 import { AppShell } from "@/features/shell/app-shell";
-import { getFeed } from "@/lib/api";
+import { FeedItem, getFeed } from "@/lib/api";
 
 import { FeedCard } from "./feed-card";
 
@@ -16,15 +16,41 @@ function FeedContent() {
   const { getToken, isLoaded } = useAuth();
   const searchParams = useSearchParams();
   const submitted = searchParams.get("submitted") === "1";
+  const [extraItems, setExtraItems] = useState<FeedItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const feedQuery = useQuery({
     queryKey: ["feed", citySlug],
     queryFn: async () => {
       const token = isLoaded ? await getToken() : null;
+      setExtraItems([]);
+      setNextCursor(null);
       return getFeed(citySlug, token);
     },
     enabled: isLoaded,
   });
+
+  const initialCursor = feedQuery.data?.next_cursor ?? null;
+  const effectiveCursor = nextCursor ?? initialCursor;
+  const allItems = [...(feedQuery.data?.items ?? []), ...extraItems];
+  const canLoadMore =
+    !feedQuery.data?.fallback && effectiveCursor !== null && !feedQuery.isLoading;
+
+  async function loadMore() {
+    if (!effectiveCursor || loadingMore) {
+      return;
+    }
+    setLoadingMore(true);
+    try {
+      const token = isLoaded ? await getToken() : null;
+      const page = await getFeed(citySlug, token, effectiveCursor);
+      setExtraItems((current) => [...current, ...page.items]);
+      setNextCursor(page.next_cursor);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   const cityName = selectedCity?.name ?? citySlug;
 
@@ -60,15 +86,15 @@ function FeedContent() {
           </p>
         )}
 
-        {feedQuery.data && feedQuery.data.items.length === 0 && (
+        {feedQuery.data && allItems.length === 0 && (
           <p className="text-sm text-[var(--muted)]">
             No public issues in {cityName} yet. Be the first to report one.
           </p>
         )}
 
         <ul className="space-y-4">
-          {feedQuery.data?.items.map((item) => (
-            <li key={`${item.kind}-${item.id}`}>
+          {allItems.map((item) => (
+            <li key={`${item.kind}-${item.complaint_id}-${item.id}`}>
               <FeedCard
                 item={item}
                 engagementUnavailable={feedQuery.data?.fallback}
@@ -76,6 +102,17 @@ function FeedContent() {
             </li>
           ))}
         </ul>
+
+        {canLoadMore && (
+          <button
+            type="button"
+            onClick={() => void loadMore()}
+            disabled={loadingMore}
+            className="w-full rounded-lg border border-civic px-4 py-2 text-sm font-medium text-civic-navy disabled:opacity-50"
+          >
+            {loadingMore ? "Loading…" : "Load more"}
+          </button>
+        )}
       </div>
     </AppShell>
   );

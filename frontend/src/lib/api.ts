@@ -204,6 +204,10 @@ export type ComplaintDetail = ComplaintFeedItem & {
   city_id?: string | null;
   external_submission?: ExternalSubmissionResponse | null;
   approximate_location_label?: string | null;
+  verification_state?: string | null;
+  is_sensitive?: boolean;
+  anonymous_to_public?: boolean;
+  viewer_is_owner?: boolean;
 };
 
 export type ComplaintFilters = {
@@ -341,6 +345,8 @@ export type CreateComplaintPayload = {
   city_slug?: string;
   ai_suggested_category_id?: string | null;
   ai_confidence?: number | null;
+  anonymous_to_public?: boolean;
+  is_sensitive?: boolean;
 };
 
 export type ExternalSubmissionStartPayload = {
@@ -606,6 +612,23 @@ export type ProfileResponse = {
   following_count: number;
   viewer_is_following: boolean;
   viewer_follow_pending: boolean;
+  messaging_user_id?: string | null;
+};
+
+export type FollowResponse = {
+  id: string;
+  follower_id: string;
+  target_id: string;
+  status: string;
+  created_at: string;
+};
+
+export type PendingFollowRequest = {
+  id: string;
+  follower_id: string;
+  follower_handle: string;
+  follower_display_name: string;
+  created_at: string;
 };
 
 export type OwnProfileResponse = ProfileResponse & {
@@ -814,8 +837,8 @@ export async function getReputation(token: string): Promise<ReputationResponse |
 export async function followProfile(
   token: string,
   profileId: string,
-): Promise<ApiResult<{ following: boolean; pending: boolean }>> {
-  return apiFetchOptional<{ following: boolean; pending: boolean }>(
+): Promise<ApiResult<FollowResponse>> {
+  return apiFetchOptional<FollowResponse>(
     `/api/v1/profiles/${profileId}/follow`,
     token,
     { method: "POST" },
@@ -825,11 +848,300 @@ export async function followProfile(
 export async function unfollowProfile(
   token: string,
   profileId: string,
-): Promise<ApiResult<{ following: boolean; pending: boolean }>> {
-  return apiFetchOptional<{ following: boolean; pending: boolean }>(
+): Promise<ApiResult<null>> {
+  return apiFetchOptional<null>(
     `/api/v1/profiles/${profileId}/follow`,
     token,
     { method: "DELETE" },
+  );
+}
+
+export async function decideFollowRequest(
+  token: string,
+  followId: string,
+  accept: boolean,
+): Promise<ApiResult<FollowResponse>> {
+  return apiFetchOptional<FollowResponse>(
+    `/api/v1/follow-requests/${followId}/decide`,
+    token,
+    { method: "POST", body: JSON.stringify({ accept }) },
+  );
+}
+
+export async function getPendingFollowRequests(
+  token: string,
+): Promise<PendingFollowRequest[]> {
+  const result = await apiFetchOptional<PendingFollowRequest[]>(
+    "/api/v1/profiles/me/follow-requests",
+    token,
+  );
+  return result.ok && result.data ? result.data : [];
+}
+
+// --- Submissions (V3) ---
+
+export type ConsentResponse = {
+  id: string;
+  complaint_id: string;
+  channel_id: string;
+  payload_hash: string;
+  authorized_at: string;
+};
+
+export type DispatchResponse = {
+  intent_id?: string | null;
+  status: string;
+  outcome_state?: string | null;
+  message?: string | null;
+  provider_message_id?: string | null;
+  official_reference?: string | null;
+  metadata?: Record<string, unknown> | null;
+  unknown_outcome?: boolean | null;
+  attempt_no?: number | null;
+  idempotent_replay?: boolean | null;
+  code?: string | null;
+};
+
+export type IntentResponse = {
+  id: string;
+  complaint_id: string;
+  status: string;
+  idempotency_key: string;
+  created_at: string;
+};
+
+export type ExternalReferenceResponse = {
+  id: string;
+  reference_value: string;
+  reference_type: string;
+  tracking_url: string | null;
+  created_at: string;
+};
+
+export type SubmissionChannelSummary = {
+  id: string;
+  label: string;
+  channel_type: string;
+  mode: string;
+  enabled: boolean;
+  url?: string | null;
+};
+
+export async function createSubmissionConsent(
+  token: string,
+  complaintId: string,
+  payload: {
+    channel_id: string;
+    disclosure_json: Record<string, unknown>;
+    scope?: string;
+  },
+): Promise<ApiResult<ConsentResponse>> {
+  return apiFetchOptional<ConsentResponse>(
+    `/api/v1/complaints/${complaintId}/authorization`,
+    token,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+export async function dispatchSubmission(
+  token: string,
+  complaintId: string,
+  payload: { consent_id: string; idempotency_key: string },
+): Promise<ApiResult<DispatchResponse>> {
+  return apiFetchOptional<DispatchResponse>(
+    `/api/v1/complaints/${complaintId}/submissions`,
+    token,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+export async function attestSubmissionSent(
+  token: string,
+  intentId: string,
+  note?: string,
+): Promise<ApiResult<IntentResponse>> {
+  return apiFetchOptional<IntentResponse>(
+    `/api/v1/submissions/${intentId}/attest-sent`,
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({ attestation_note: note ?? null }),
+    },
+  );
+}
+
+export async function attachSubmissionReference(
+  token: string,
+  intentId: string,
+  payload: { reference_value: string; tracking_url?: string | null },
+): Promise<ApiResult<ExternalReferenceResponse>> {
+  return apiFetchOptional<ExternalReferenceResponse>(
+    `/api/v1/submissions/${intentId}/reference`,
+    token,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+export async function getComplaintSubmissionChannels(
+  token: string | null,
+  complaintId: string,
+): Promise<SubmissionChannelSummary[]> {
+  const result = await apiFetchOptional<SubmissionChannelSummary[]>(
+    `/api/v1/complaints/${complaintId}/submission-channels`,
+    token,
+  );
+  return result.ok && result.data ? result.data : [];
+}
+
+// --- Timeline ---
+
+export type TimelineEvent = {
+  id: string;
+  event_type: string;
+  actor_kind: string;
+  public_payload?: Record<string, unknown> | null;
+  created_at: string;
+};
+
+export type ComplaintTimelineResponse = {
+  items: TimelineEvent[];
+};
+
+export async function getComplaintTimeline(
+  token: string | null,
+  complaintId: string,
+): Promise<ComplaintTimelineResponse | null> {
+  const result = await apiFetchOptional<ComplaintTimelineResponse>(
+    `/api/v1/complaints/${complaintId}/timeline`,
+    token,
+  );
+  return result.ok ? result.data : null;
+}
+
+// --- Resolution ---
+
+export type EvidenceResponse = {
+  id: string;
+  complaint_id: string;
+  submitter_id: string;
+  submitter_role: string;
+  assertion: string;
+  status: string;
+  created_at: string;
+};
+
+export type VerificationResponse = {
+  id: string;
+  verification_state: string;
+};
+
+export type ReviewResponse = {
+  id: string;
+  complaint_id: string;
+  evidence_id: string | null;
+  decision: string;
+  reviewer_id: string;
+  created_at: string;
+};
+
+export async function submitResolutionEvidence(
+  token: string,
+  complaintId: string,
+  payload: { assertion: string; media_url?: string | null },
+): Promise<ApiResult<EvidenceResponse>> {
+  return apiFetchOptional<EvidenceResponse>(
+    `/api/v1/complaints/${complaintId}/resolution-evidence`,
+    token,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+export async function confirmResolution(
+  token: string,
+  complaintId: string,
+  payload: { confirmed: boolean; reason?: string | null },
+): Promise<ApiResult<VerificationResponse>> {
+  return apiFetchOptional<VerificationResponse>(
+    `/api/v1/complaints/${complaintId}/resolution-confirmation`,
+    token,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+export async function reviewResolution(
+  token: string,
+  complaintId: string,
+  payload: {
+    evidence_id?: string | null;
+    decision: string;
+    reason?: string | null;
+  },
+): Promise<ApiResult<ReviewResponse>> {
+  return apiFetchOptional<ReviewResponse>(
+    `/api/v1/complaints/${complaintId}/resolution-review`,
+    token,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+export const VERIFICATION_STATE_LABELS: Record<string, string> = {
+  none: "Not verified",
+  pending: "Pending verification",
+  confirmed_by_reporter: "Confirmed by reporter",
+  verified: "Independently verified",
+  disputed: "Disputed",
+};
+
+// --- Messaging (extended) ---
+
+export type DirectChatResponse = {
+  type: string;
+  conversation_id?: string | null;
+  request_id?: string | null;
+  status?: string | null;
+};
+
+export type ConversationResponse = {
+  id: string;
+  type: string;
+  name: string | null;
+  created_by: string;
+  visibility: string;
+  created_at: string;
+};
+
+export async function createDirectChat(
+  token: string,
+  recipientClerkUserId: string,
+): Promise<ApiResult<DirectChatResponse>> {
+  return apiFetchOptional<DirectChatResponse>("/api/v1/chats/direct", token, {
+    method: "POST",
+    body: JSON.stringify({ recipient_id: recipientClerkUserId }),
+  });
+}
+
+export async function createGroupChat(
+  token: string,
+  payload: { name: string; type?: string },
+): Promise<ApiResult<ConversationResponse>> {
+  return apiFetchOptional<ConversationResponse>("/api/v1/chats/groups", token, {
+    method: "POST",
+    body: JSON.stringify({
+      name: payload.name,
+      visibility: payload.type ?? "private",
+    }),
+  });
+}
+
+export async function decideChatRequest(
+  token: string,
+  requestId: string,
+  decision: "accept" | "decline" | "block",
+): Promise<ApiResult<Record<string, unknown>>> {
+  return apiFetchOptional<Record<string, unknown>>(
+    `/api/v1/chats/requests/${requestId}/decide`,
+    token,
+    { method: "POST", body: JSON.stringify({ decision }) },
   );
 }
 

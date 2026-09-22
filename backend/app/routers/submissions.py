@@ -15,6 +15,7 @@ from app.schemas.submission import (
     ExternalReferenceResponse,
     IntentResponse,
     ReconcileRequest,
+    VerifyReferenceRequest,
 )
 from app.services import submission_engine
 
@@ -86,6 +87,22 @@ def attach_submission_reference(
         reference_value=payload.reference_value,
         reference_type=payload.reference_type,
         tracking_url=payload.tracking_url,
+    )
+    return ExternalReferenceResponse.model_validate(ref)
+
+
+@router.post("/submissions/{intent_id}/verify-reference", response_model=ExternalReferenceResponse)
+def verify_submission_reference(
+    intent_id: uuid.UUID,
+    payload: VerifyReferenceRequest,
+    db: Session = Depends(get_db),
+    admin_user: ClerkUser = Depends(require_admin),
+) -> ExternalReferenceResponse:
+    ref = submission_engine.verify_reference(
+        db,
+        admin_user_id=admin_user.user_id,
+        intent_id=intent_id,
+        reference_id=payload.reference_id,
     )
     return ExternalReferenceResponse.model_validate(ref)
 

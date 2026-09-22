@@ -30,6 +30,7 @@ class EvidenceKind(StrEnum):
 
 class MediaVisibility(StrEnum):
     PUBLIC = "public"
+    PRIVATE = "private"
     OWNER = "owner"
     INTERNAL = "internal"
 

@@ -84,6 +84,7 @@ def build_profile_response(
         following_count=_following_count(db, profile.clerk_user_id),
         viewer_is_following=viewer_is_following,
         viewer_follow_pending=viewer_follow_pending,
+        messaging_user_id=profile.clerk_user_id,
     )
 
 

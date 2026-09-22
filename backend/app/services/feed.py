@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.models.city import City
 from app.models.community import FeedEvent, FeedEventKind
 from app.models.complaint import Complaint
+from app.models.complaint_image import MediaVisibility
 from app.services.social import get_engagement_counts
 
 DESCRIPTION_PREVIEW_LENGTH = 150
@@ -50,7 +51,8 @@ def _build_feed_item(
     viewer_id: str | None,
 ) -> dict:
     images = sorted(complaint.images, key=lambda img: img.sort_order)
-    image_url = images[0].cloudinary_url if images else None
+    public_images = [img for img in images if img.visibility == MediaVisibility.PUBLIC]
+    image_url = public_images[0].cloudinary_url if public_images else None
     engagement = get_engagement_counts(db, complaint_id=complaint.id, viewer_id=viewer_id)
     category_name = complaint.category.name if complaint.category else None
 

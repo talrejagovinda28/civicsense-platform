@@ -19,6 +19,8 @@ export type ComplaintDraft = {
   aiConfidence: number | null;
   title: string;
   description: string;
+  anonymousToPublic: boolean;
+  isSensitive: boolean;
 };
 
 export const COMPLAINT_WIZARD_STEPS = [
@@ -49,4 +51,6 @@ export const emptyComplaintDraft = (
   aiConfidence: null,
   title: "",
   description: "",
+  anonymousToPublic: false,
+  isSensitive: false,
 });

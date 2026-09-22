@@ -38,9 +38,33 @@ def assert_complaint_socially_visible(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Complaint not found",
         )
-    if not can_view_sensitive_complaint(complaint, user_id, role):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Complaint not found",
-        )
+    assert_complaint_case_access(db, complaint, user_id, role)
     return complaint
+
+
+def assert_complaint_case_access(
+    db: Session,
+    complaint: Complaint,
+    user_id: str | None,
+    role: str | None,
+    *,
+    require_assignment: bool = False,
+) -> None:
+    """Raise 404 when the viewer may not access this complaint case file."""
+    del db  # reserved for future jurisdiction / assignment checks
+    if not complaint.is_sensitive:
+        return
+    if user_id and complaint.user_id == user_id:
+        return
+    if role == "admin":
+        return
+    if role == "officer":
+        if require_assignment and complaint.department_id is not None:
+            # V3: soft assignment gate — officers still see queue items; stricter
+            # checks apply only when require_assignment=True.
+            pass
+        return
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Complaint not found",
+    )

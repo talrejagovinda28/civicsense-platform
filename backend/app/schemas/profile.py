@@ -21,6 +21,7 @@ class ProfileResponse(BaseModel):
     following_count: int = 0
     viewer_is_following: bool = False
     viewer_follow_pending: bool = False
+    messaging_user_id: str | None = None
 
 
 class OwnProfileResponse(ProfileResponse):

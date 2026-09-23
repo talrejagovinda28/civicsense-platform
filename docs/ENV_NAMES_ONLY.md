@@ -1,0 +1,3 @@
+# Environment variables — names only, never keys in this pack
+
+Cursor must inspect code and produce an accurate `.env.example` for only USED variables. The list in `docs/11_DEPLOY_AND_CONNECT_LAST.md` is a candidate list, not an instruction to add unused env vars. Keep frontend public and server-only separation. No hardcoded keys and no passwords in reports or test fixtures. External dispatch defaults OFF even when keys are present. Remove obsolete `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` after confirming complete replacement with MapLibre. Do not remove critical existing deployment variables until tests show safe.

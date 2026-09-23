@@ -14,6 +14,18 @@ logger = logging.getLogger(__name__)
 APP_NAME = "CivicSense"
 APP_VERSION = "0.1.0"
 
+if settings.ENVIRONMENT.lower() == "production":
+    unsafe: list[str] = []
+    if settings.EXTERNAL_DISPATCH_GLOBAL_ENABLED:
+        unsafe.append("EXTERNAL_DISPATCH_GLOBAL_ENABLED")
+    if settings.CIVICSENSE_ALLOW_FAKE_ADAPTERS:
+        unsafe.append("CIVICSENSE_ALLOW_FAKE_ADAPTERS")
+    if unsafe:
+        raise RuntimeError(
+            "Refusing to start: unsafe production flags are enabled: "
+            + ", ".join(unsafe)
+        )
+
 app = FastAPI(title=APP_NAME, version=APP_VERSION)
 
 app.add_middleware(

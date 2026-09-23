@@ -25,7 +25,7 @@ export function WizardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { getToken } = useAuth();
-  const { selectedCity, isReportingEnabled } = useCity();
+  const { selectedCity, isReportingEnabled, isLoading: cityLoading } = useCity();
   const { draft, canProceed, resetDraft, updateDraft } = useComplaintWizard();
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -48,6 +48,19 @@ export function WizardShell({ children }: { children: React.ReactNode }) {
           Start over
         </Link>
       </main>
+    );
+  }
+
+  // While city config loads, keep the shell mounted so MapLibre is not torn down
+  // and remounted (that remount + click race caused client crashes on Preview).
+  if (cityLoading) {
+    return (
+      <>
+        <AppHeader />
+        <main className="mx-auto max-w-lg px-6 py-16 text-center">
+          <p className="text-sm text-[var(--muted)]">Loading city settings…</p>
+        </main>
+      </>
     );
   }
 

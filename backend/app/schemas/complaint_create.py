@@ -48,3 +48,6 @@ class ComplaintCreate(BaseModel):
     city_slug: str = Field(default="pune", max_length=100)
     ai_suggested_category_id: uuid.UUID | None = None
     ai_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    is_sensitive: bool = False
+    anonymous_to_public: bool = False
+    public_caption: str | None = Field(default=None, max_length=500)

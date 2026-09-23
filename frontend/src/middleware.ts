@@ -1,11 +1,15 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
+import { shouldEnableClerkFrontendProxy } from "@/lib/clerk-proxy";
+
 const isProtectedRoute = createRouteMatcher([
   "/dashboard(.*)",
   "/complaints/new(.*)",
   "/officer(.*)",
   "/admin(.*)",
+  "/chats(.*)",
+  "/profile",
 ]);
 
 const isOfficerRoute = createRouteMatcher(["/officer(.*)"]);
@@ -23,9 +27,16 @@ function getRoleFromClaims(
     return metadata.role;
   }
 
-  const publicMetadata = sessionClaims.public_metadata as { role?: string } | undefined;
+  const publicMetadata = sessionClaims.public_metadata as
+    | { role?: string }
+    | undefined;
   if (publicMetadata?.role) {
     return publicMetadata.role;
+  }
+
+  const topLevelRole = sessionClaims.role;
+  if (typeof topLevelRole === "string" && topLevelRole.trim()) {
+    return topLevelRole.trim().toLowerCase();
   }
 
   return "citizen";
@@ -56,8 +67,9 @@ export default clerkMiddleware(
     }
   },
   {
+    // Explicit enabled fn prevents Clerk @7 auto-proxy on Preview *.vercel.app.
     frontendApiProxy: {
-      enabled: true,
+      enabled: (url) => shouldEnableClerkFrontendProxy(url),
     },
   },
 );

@@ -6,12 +6,18 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { AccountabilityCard } from "@/features/accountability/accountability-card";
-import { OfficialHandoffCard } from "@/features/routing/official-handoff-card";
+import { ComplaintTimeline } from "@/features/complaints/complaint-timeline";
+import { ResolutionPanel } from "@/features/resolution/resolution-panel";
+import { OfficialSubmissionCard } from "@/features/submissions/official-submission-card";
+import { CommentsSection } from "@/features/social/comments-section";
+import { EngagementBar } from "@/features/social/engagement-bar";
 import {
   apiFetch,
   ComplaintDetail,
   ComplaintFeedItem,
+  EngagementCounts,
   getComplaint,
+  getComplaintEngagement,
   getNextStatusOptions,
   STATUS_LABELS,
   updateComplaintStatus,
@@ -23,7 +29,7 @@ type ComplaintDetailViewProps = {
 };
 
 export function ComplaintDetailView({ complaintId }: ComplaintDetailViewProps) {
-  const { getToken, isLoaded } = useAuth();
+  const { getToken, isLoaded, userId } = useAuth();
   const queryClient = useQueryClient();
   const [selectedStatus, setSelectedStatus] = useState("");
   const [note, setNote] = useState("");
@@ -43,6 +49,15 @@ export function ComplaintDetailView({ complaintId }: ComplaintDetailViewProps) {
     queryFn: async () => {
       const token = await getToken();
       return getComplaint(token, complaintId);
+    },
+    enabled: isLoaded,
+  });
+
+  const engagementQuery = useQuery({
+    queryKey: ["engagement", complaintId],
+    queryFn: async () => {
+      const token = await getToken();
+      return getComplaintEngagement(token, complaintId);
     },
     enabled: isLoaded,
   });
@@ -86,17 +101,35 @@ export function ComplaintDetailView({ complaintId }: ComplaintDetailViewProps) {
   const complaint = complaintQuery.data;
   const role = meQuery.data?.role ?? "citizen";
   const canUpdateStatus = role === "officer" || role === "admin";
+  const isOfficer = role === "officer" || role === "admin";
+  const isOwner =
+    complaint.viewer_is_owner ??
+    (complaint.user_id !== undefined &&
+      complaint.user_id !== null &&
+      (complaint.user_id === userId || complaint.user_id === meQuery.data?.user_id));
   const nextStatuses = getNextStatusOptions(complaint.status, role);
 
   const mapLat = complaint.public_latitude ?? complaint.latitude ?? null;
   const mapLng = complaint.public_longitude ?? complaint.longitude ?? null;
   const citySlug = complaint.city.toLowerCase().replace(/\s+/g, "-");
 
+  const engagement: EngagementCounts = engagementQuery.data ?? {
+    like_count: 0,
+    affected_count: 0,
+    comment_count: 0,
+    viewer_liked: false,
+    viewer_affected: false,
+  };
+
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
       <ComplaintDetailContent
         complaint={complaint}
+        engagement={engagement}
+        engagementUnavailable={engagementQuery.data === null && !engagementQuery.isLoading}
         canUpdateStatus={canUpdateStatus}
+        isOwner={isOwner}
+        isOfficer={isOfficer}
         nextStatuses={nextStatuses}
         selectedStatus={selectedStatus}
         note={note}
@@ -114,7 +147,7 @@ export function ComplaintDetailView({ complaintId }: ComplaintDetailViewProps) {
           longitude={mapLng}
           categoryId={complaint.category.id}
         />
-        <OfficialHandoffCard complaint={complaint} />
+        <OfficialSubmissionCard complaint={complaint} />
       </aside>
     </div>
   );
@@ -122,7 +155,11 @@ export function ComplaintDetailView({ complaintId }: ComplaintDetailViewProps) {
 
 function ComplaintDetailContent({
   complaint,
+  engagement,
+  engagementUnavailable,
   canUpdateStatus,
+  isOwner,
+  isOfficer,
   nextStatuses,
   selectedStatus,
   note,
@@ -133,7 +170,11 @@ function ComplaintDetailContent({
   onSubmitUpdate,
 }: {
   complaint: ComplaintDetail;
+  engagement: EngagementCounts;
+  engagementUnavailable: boolean;
   canUpdateStatus: boolean;
+  isOwner: boolean;
+  isOfficer: boolean;
   nextStatuses: { value: string; label: string }[];
   selectedStatus: string;
   note: string;
@@ -180,27 +221,17 @@ function ComplaintDetailContent({
         {complaint.address && <DetailItem label="Address" value={complaint.address} />}
       </dl>
 
-      <section>
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
-          Status Timeline
-        </h3>
-        <ol className="mt-4 space-y-4 border-l border-civic pl-4">
-          {(complaint.status_history ?? []).map((entry) => (
-            <li key={entry.id} className="relative">
-              <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-[var(--primary)]" />
-              <p className="text-sm font-medium">
-                {STATUS_LABELS[entry.status] ?? entry.status}
-              </p>
-              {entry.note && (
-                <p className="mt-1 text-sm text-[var(--muted)]">{entry.note}</p>
-              )}
-              <p className="mt-1 text-xs text-[var(--muted)]">
-                {new Date(entry.created_at).toLocaleString()}
-              </p>
-            </li>
-          ))}
-        </ol>
-      </section>
+      <EngagementBar
+        complaintId={complaint.id}
+        initial={engagement}
+        unavailable={engagementUnavailable}
+      />
+
+      <CommentsSection complaintId={complaint.id} />
+
+      <ComplaintTimeline complaint={complaint} />
+
+      <ResolutionPanel complaint={complaint} isOwner={isOwner} isOfficer={isOfficer} />
 
       {canUpdateStatus && nextStatuses.length > 0 && (
         <section className="rounded-xl border border-civic bg-[var(--surface-muted)] p-4">

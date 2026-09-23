@@ -4,7 +4,7 @@ import type { Map as MapLibreMap, Marker } from "maplibre-gl";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { MapAttribution } from "@/features/map/map-attribution";
-import { getMapLibre, resizeMap } from "@/features/map/maplibre-setup";
+import { getMapLibre, isFatalMapError, resizeMap } from "@/features/map/maplibre-setup";
 import {
   createBaseMapStyle,
   DEFAULT_PUNE_CENTER,
@@ -27,6 +27,10 @@ type MapPickerProps = {
   onLocationChange: (location: MapLocation) => void;
 };
 
+function isFiniteCoord(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 export function MapPicker({
   latitude,
   longitude,
@@ -38,6 +42,9 @@ export function MapPicker({
   const mapRef = useRef<MapLibreMap | null>(null);
   const markerRef = useRef<Marker | null>(null);
   const onLocationChangeRef = useRef(onLocationChange);
+  const addressRef = useRef(address ?? "");
+  const wardRef = useRef(ward ?? "");
+  const aliveRef = useRef(true);
 
   const [addressValue, setAddressValue] = useState(address ?? "");
   const [wardValue, setWardValue] = useState(ward ?? "");
@@ -49,16 +56,27 @@ export function MapPicker({
   }, [onLocationChange]);
 
   useEffect(() => {
+    addressRef.current = addressValue;
+  }, [addressValue]);
+
+  useEffect(() => {
+    wardRef.current = wardValue;
+  }, [wardValue]);
+
+  useEffect(() => {
     if (address !== null && address !== addressValue) {
       setAddressValue(address);
     }
-  }, [address, addressValue]);
+    // Sync from parent only when parent value changes — omit addressValue to avoid loops.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
+  }, [address]);
 
   useEffect(() => {
     if (ward !== null && ward !== wardValue) {
       setWardValue(ward);
     }
-  }, [ward, wardValue]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
+  }, [ward]);
 
   const publishLocation = useCallback(
     (next: {
@@ -67,58 +85,90 @@ export function MapPicker({
       address: string;
       ward: string | null;
     }) => {
-      onLocationChangeRef.current({
-        latitude: next.latitude,
-        longitude: next.longitude,
-        address: next.address,
-        googlePlaceId: null,
-        ward: next.ward,
-      });
+      if (!aliveRef.current) {
+        return;
+      }
+      try {
+        onLocationChangeRef.current({
+          latitude: isFiniteCoord(next.latitude) ? next.latitude : null,
+          longitude: isFiniteCoord(next.longitude) ? next.longitude : null,
+          address: next.address,
+          googlePlaceId: null,
+          ward: next.ward,
+        });
+      } catch (error) {
+        console.error("Failed to publish map location:", error);
+      }
     },
     [],
   );
 
   const setMarkerAt = useCallback(
-    (lng: number, lat: number, nextAddress = addressValue, nextWard = wardValue) => {
+    (lng: number, lat: number) => {
       const map = mapRef.current;
-      if (!map) {
+      if (!aliveRef.current || !map || !isFiniteCoord(lng) || !isFiniteCoord(lat)) {
         return;
       }
 
-      const maplibregl = getMapLibre();
+      try {
+        const maplibregl = getMapLibre();
+        const nextAddress = addressRef.current;
+        const nextWard = wardRef.current.trim() || null;
 
-      if (!markerRef.current) {
-        markerRef.current = new maplibregl.Marker({ draggable: true, color: "#2563eb" })
-          .setLngLat([lng, lat])
-          .addTo(map);
+        if (!markerRef.current) {
+          markerRef.current = new maplibregl.Marker({
+            draggable: true,
+            color: "#2563eb",
+          })
+            .setLngLat([lng, lat])
+            .addTo(map);
 
-        markerRef.current.on("dragend", () => {
-          const position = markerRef.current?.getLngLat();
-          if (!position) {
-            return;
-          }
-          publishLocation({
-            latitude: position.lat,
-            longitude: position.lng,
-            address: addressValue,
-            ward: wardValue.trim() || null,
+          markerRef.current.on("dragend", () => {
+            if (!aliveRef.current) {
+              return;
+            }
+            try {
+              const position = markerRef.current?.getLngLat();
+              if (!position) {
+                return;
+              }
+              publishLocation({
+                latitude: position.lat,
+                longitude: position.lng,
+                address: addressRef.current,
+                ward: wardRef.current.trim() || null,
+              });
+            } catch (error) {
+              console.error("Map marker drag failed:", error);
+            }
           });
-        });
-      } else {
-        markerRef.current.setLngLat([lng, lat]);
-      }
+        } else {
+          markerRef.current.setLngLat([lng, lat]);
+        }
 
-      publishLocation({
-        latitude: lat,
-        longitude: lng,
-        address: nextAddress,
-        ward: nextWard.trim() || null,
-      });
+        publishLocation({
+          latitude: lat,
+          longitude: lng,
+          address: nextAddress,
+          ward: nextWard,
+        });
+      } catch (error) {
+        console.error("Failed to place map marker:", error);
+        setLoadError(
+          error instanceof Error ? error.message : "Failed to place map marker.",
+        );
+      }
     },
-    [addressValue, publishLocation, wardValue],
+    [publishLocation],
   );
 
+  const setMarkerAtRef = useRef(setMarkerAt);
   useEffect(() => {
+    setMarkerAtRef.current = setMarkerAt;
+  }, [setMarkerAt]);
+
+  useEffect(() => {
+    aliveRef.current = true;
     if (!containerRef.current || mapRef.current) {
       return;
     }
@@ -126,7 +176,7 @@ export function MapPicker({
     try {
       const maplibregl = getMapLibre();
       const initialCenter =
-        latitude !== null && longitude !== null
+        isFiniteCoord(latitude) && isFiniteCoord(longitude)
           ? ([longitude, latitude] as [number, number])
           : ([DEFAULT_PUNE_CENTER.lng, DEFAULT_PUNE_CENTER.lat] as [number, number]);
 
@@ -134,20 +184,40 @@ export function MapPicker({
         container: containerRef.current,
         style: createBaseMapStyle(),
         center: initialCenter,
-        zoom: latitude !== null && longitude !== null ? 16 : DEFAULT_PUNE_ZOOM,
+        zoom:
+          isFiniteCoord(latitude) && isFiniteCoord(longitude)
+            ? 16
+            : DEFAULT_PUNE_ZOOM,
         attributionControl: false,
       });
 
+      map.on("error", (event) => {
+        const message =
+          event.error instanceof Error
+            ? event.error.message
+            : String(event.error ?? "Map error");
+        if (isFatalMapError(message)) {
+          console.error("MapLibre fatal error:", message);
+          setLoadError(message);
+        }
+      });
+
       map.on("load", () => {
+        if (!aliveRef.current) {
+          return;
+        }
         resizeMap(map);
         setMapReady(true);
-        if (latitude !== null && longitude !== null) {
-          setMarkerAt(longitude, latitude);
+        if (isFiniteCoord(latitude) && isFiniteCoord(longitude)) {
+          setMarkerAtRef.current(longitude, latitude);
         }
       });
 
       map.on("click", (event) => {
-        setMarkerAt(event.lngLat.lng, event.lngLat.lat);
+        if (!aliveRef.current) {
+          return;
+        }
+        setMarkerAtRef.current(event.lngLat.lng, event.lngLat.lat);
       });
 
       mapRef.current = map;
@@ -158,9 +228,18 @@ export function MapPicker({
     }
 
     return () => {
-      markerRef.current?.remove();
+      aliveRef.current = false;
+      try {
+        markerRef.current?.remove();
+      } catch {
+        // ignore cleanup races
+      }
       markerRef.current = null;
-      mapRef.current?.remove();
+      try {
+        mapRef.current?.remove();
+      } catch {
+        // ignore cleanup races
+      }
       mapRef.current = null;
       setMapReady(false);
     };
@@ -169,8 +248,34 @@ export function MapPicker({
 
   if (loadError) {
     return (
-      <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-        Failed to load map: {loadError}
+      <div className="space-y-4">
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          Map unavailable: {loadError}. You can still enter address and ward below.
+        </div>
+        <ManualLocationFields
+          addressValue={addressValue}
+          wardValue={wardValue}
+          latitude={latitude}
+          longitude={longitude}
+          onAddressChange={(value) => {
+            setAddressValue(value);
+            publishLocation({
+              latitude,
+              longitude,
+              address: value,
+              ward: wardValue.trim() || null,
+            });
+          }}
+          onWardChange={(value) => {
+            setWardValue(value);
+            publishLocation({
+              latitude,
+              longitude,
+              address: addressValue,
+              ward: value.trim() || null,
+            });
+          }}
+        />
       </div>
     );
   }
@@ -182,7 +287,11 @@ export function MapPicker({
       </p>
 
       <div className="relative h-80 overflow-hidden rounded-lg border border-neutral-200">
-        <div ref={containerRef} className="h-full w-full" aria-label="Location picker map" />
+        <div
+          ref={containerRef}
+          className="h-full w-full"
+          aria-label="Location picker map"
+        />
         <MapAttribution />
         {!mapReady && (
           <div className="absolute inset-0 flex items-center justify-center bg-neutral-50 text-sm text-neutral-500">
@@ -191,22 +300,58 @@ export function MapPicker({
         )}
       </div>
 
+      <ManualLocationFields
+        addressValue={addressValue}
+        wardValue={wardValue}
+        latitude={latitude}
+        longitude={longitude}
+        onAddressChange={(value) => {
+          setAddressValue(value);
+          publishLocation({
+            latitude,
+            longitude,
+            address: value,
+            ward: wardValue.trim() || null,
+          });
+        }}
+        onWardChange={(value) => {
+          setWardValue(value);
+          publishLocation({
+            latitude,
+            longitude,
+            address: addressValue,
+            ward: value.trim() || null,
+          });
+        }}
+      />
+    </div>
+  );
+}
+
+function ManualLocationFields({
+  addressValue,
+  wardValue,
+  latitude,
+  longitude,
+  onAddressChange,
+  onWardChange,
+}: {
+  addressValue: string;
+  wardValue: string;
+  latitude: number | null;
+  longitude: number | null;
+  onAddressChange: (value: string) => void;
+  onWardChange: (value: string) => void;
+}) {
+  return (
+    <>
       <label className="block space-y-1 text-sm">
         <span className="font-medium">Area / ward</span>
         <input
           type="text"
           placeholder="e.g. Kothrud, Hadapsar"
           value={wardValue}
-          onChange={(event) => {
-            const value = event.target.value;
-            setWardValue(value);
-            publishLocation({
-              latitude,
-              longitude,
-              address: addressValue,
-              ward: value.trim() || null,
-            });
-          }}
+          onChange={(event) => onWardChange(event.target.value)}
           className="w-full rounded-lg border border-neutral-300 px-3 py-2"
         />
       </label>
@@ -216,22 +361,13 @@ export function MapPicker({
         <textarea
           placeholder="Street, landmark, or nearby reference"
           value={addressValue}
-          onChange={(event) => {
-            const value = event.target.value;
-            setAddressValue(value);
-            publishLocation({
-              latitude,
-              longitude,
-              address: value,
-              ward: wardValue.trim() || null,
-            });
-          }}
+          onChange={(event) => onAddressChange(event.target.value)}
           rows={3}
           className="w-full rounded-lg border border-neutral-300 px-3 py-2"
         />
       </label>
 
-      {latitude !== null && longitude !== null && (
+      {isFiniteCoord(latitude) && isFiniteCoord(longitude) && (
         <div className="rounded-lg bg-neutral-50 px-4 py-3 text-sm">
           <p className="font-medium">{addressValue || "Address not entered yet"}</p>
           <p className="mt-1 text-xs text-neutral-500">
@@ -239,6 +375,6 @@ export function MapPicker({
           </p>
         </div>
       )}
-    </div>
+    </>
   );
 }

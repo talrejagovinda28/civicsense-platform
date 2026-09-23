@@ -16,6 +16,7 @@ class ExternalSubmissionResponse(BaseModel):
     status_url: str | None
     forwarded_at: datetime | None
     token_received_at: datetime | None
+    reference_note: str | None = None
 
     model_config = {"from_attributes": True}
 

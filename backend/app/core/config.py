@@ -19,6 +19,19 @@ class Settings(BaseSettings):
     CLOUDINARY_API_SECRET: str = ""
     CLOUDINARY_FOLDER: str = "civicsense/complaints"
 
+    ENVIRONMENT: str = "production"
+    CIVICSENSE_ALLOW_FAKE_ADAPTERS: bool = False
+    EXTERNAL_DISPATCH_GLOBAL_ENABLED: bool = False
+    # Optional: pin JWT issuer to this Clerk Frontend API URL (recommended in production)
+    CLERK_ISSUER: str = ""
+
+    @property
+    def fake_adapters_allowed(self) -> bool:
+        return (
+            self.ENVIRONMENT in {"test", "development"}
+            and self.CIVICSENSE_ALLOW_FAKE_ADAPTERS
+        )
+
     @property
     def database_url(self) -> str:
         url = self.DATABASE_URL

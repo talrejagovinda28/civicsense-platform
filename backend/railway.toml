@@ -1,3 +1,8 @@
+# Backend Railway service
+# Start = uvicorn only. Do NOT put `alembic upgrade` here.
+# If the Railway dashboard still has pre-deploy `python -m alembic upgrade head`,
+# clear it before merging PR #1 (see docs/CIVICSENSE_DEPLOY_RUNBOOK.md).
+
 [build]
 builder = "NIXPACKS"
 

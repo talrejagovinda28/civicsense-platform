@@ -35,10 +35,10 @@ export function LocationStep() {
         longitude: location.longitude,
         address: location.address,
         googlePlaceId: location.googlePlaceId,
-        ward: location.ward !== undefined ? location.ward : draft.ward,
+        ...(location.ward !== undefined ? { ward: location.ward } : {}),
       });
     },
-    [draft.ward, updateDraft],
+    [updateDraft],
   );
 
   return (

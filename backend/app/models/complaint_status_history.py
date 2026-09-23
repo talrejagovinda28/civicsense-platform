@@ -25,7 +25,12 @@ class ComplaintStatusHistory(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         index=True,
     )
     status: Mapped[ComplaintStatus] = mapped_column(
-        Enum(\n            ComplaintStatus,\n            name="complaint_status",\n            create_type=False,\n            values_callable=lambda enum_cls: [item.value for item in enum_cls],\n        ),
+        Enum(
+            ComplaintStatus,
+            name="complaint_status",
+            create_type=False,
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
         nullable=False,
     )
     note: Mapped[str | None] = mapped_column(Text, nullable=True)

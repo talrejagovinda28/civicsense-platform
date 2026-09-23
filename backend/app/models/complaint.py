@@ -58,7 +58,11 @@ class Complaint(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[ComplaintStatus] = mapped_column(
-        Enum(\n            ComplaintStatus,\n            name="complaint_status",\n            values_callable=lambda enum_cls: [item.value for item in enum_cls],\n        ),
+        Enum(
+            ComplaintStatus,
+            name="complaint_status",
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
         default=ComplaintStatus.SUBMITTED,
         nullable=False,
     )

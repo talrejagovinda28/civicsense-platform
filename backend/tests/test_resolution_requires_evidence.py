@@ -75,13 +75,14 @@ def test_officer_can_verify_with_other_evidence(db, complaint):
     assert review.decision == "verified_resolved"
 
 
-def test_admin_can_verify_without_evidence(db, complaint):
-    review = independent_review(
-        db,
-        reviewer_id="admin_1",
-        reviewer_role="admin",
-        complaint_id=complaint.id,
-        evidence_id=None,
-        decision="verified_resolved",
-    )
-    assert review.decision == "verified_resolved"
+def test_admin_cannot_verify_without_evidence(db, complaint):
+    with pytest.raises(__import__("fastapi").HTTPException) as exc_info:
+        independent_review(
+            db,
+            reviewer_id="admin_1",
+            reviewer_role="admin",
+            complaint_id=complaint.id,
+            evidence_id=None,
+            decision="verified_resolved",
+        )
+    assert exc_info.value.status_code == 422

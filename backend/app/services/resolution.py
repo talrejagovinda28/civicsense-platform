@@ -104,9 +104,9 @@ def independent_review(
             detail="Reporter cannot independently verify own case",
         )
 
-    if decision == "verified_resolved" and reviewer_role == "officer":
+    if decision == "verified_resolved":
         if evidence_id is None:
-            # Prefer the newest evidence not authored by the reviewing officer.
+            # Prefer newest evidence not authored by the reviewer (officers and admins).
             candidates = (
                 db.query(ResolutionEvidence)
                 .filter(
@@ -125,11 +125,11 @@ def independent_review(
                 if any_evidence == 0:
                     raise HTTPException(
                         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail="Officers must provide evidence_id to verify resolution",
+                        detail="Resolution verification requires prior evidence",
                     )
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Officer cannot independently verify own fix evidence",
+                    detail="Reviewer cannot independently verify own fix evidence",
                 )
             evidence_id = candidates[0].id
 
@@ -138,7 +138,7 @@ def independent_review(
         evidence = db.get(ResolutionEvidence, evidence_id)
         if evidence is None or evidence.complaint_id != complaint_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence not found")
-        if reviewer_role == "officer" and evidence.submitter_id == reviewer_id:
+        if evidence.submitter_id == reviewer_id and reviewer_role != "admin":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Officer cannot independently verify own fix evidence",

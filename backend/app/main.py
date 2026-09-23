@@ -15,13 +15,15 @@ APP_NAME = "CivicSense"
 APP_VERSION = "0.1.0"
 
 if settings.ENVIRONMENT.lower() == "production":
+    unsafe: list[str] = []
     if settings.EXTERNAL_DISPATCH_GLOBAL_ENABLED:
-        logger.error(
-            "EXTERNAL_DISPATCH_GLOBAL_ENABLED=true in production — live outbound must stay off until approved"
-        )
+        unsafe.append("EXTERNAL_DISPATCH_GLOBAL_ENABLED")
     if settings.CIVICSENSE_ALLOW_FAKE_ADAPTERS:
-        logger.error(
-            "CIVICSENSE_ALLOW_FAKE_ADAPTERS=true in production — fake adapters must stay disabled"
+        unsafe.append("CIVICSENSE_ALLOW_FAKE_ADAPTERS")
+    if unsafe:
+        raise RuntimeError(
+            "Refusing to start: unsafe production flags are enabled: "
+            + ", ".join(unsafe)
         )
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION)

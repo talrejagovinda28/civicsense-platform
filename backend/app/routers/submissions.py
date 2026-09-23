@@ -15,11 +15,29 @@ from app.schemas.submission import (
     ExternalReferenceResponse,
     IntentResponse,
     ReconcileRequest,
+    SubmissionChannelSummary,
     VerifyReferenceRequest,
 )
 from app.services import submission_engine
 
 router = APIRouter(tags=["submissions"])
+
+
+@router.get(
+    "/complaints/{complaint_id}/submission-channels",
+    response_model=list[SubmissionChannelSummary],
+)
+def list_complaint_submission_channels(
+    complaint_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: ClerkUser = Depends(get_current_user),
+) -> list[SubmissionChannelSummary]:
+    items = submission_engine.list_submission_channels(
+        db,
+        user_id=current_user.user_id,
+        complaint_id=complaint_id,
+    )
+    return [SubmissionChannelSummary.model_validate(item) for item in items]
 
 
 @router.post("/complaints/{complaint_id}/authorization", response_model=ConsentResponse)
@@ -85,7 +103,6 @@ def attach_submission_reference(
         user_id=current_user.user_id,
         intent_id=intent_id,
         reference_value=payload.reference_value,
-        reference_type=payload.reference_type,
         tracking_url=payload.tracking_url,
     )
     return ExternalReferenceResponse.model_validate(ref)

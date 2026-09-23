@@ -151,7 +151,7 @@ def test_channel(db: Session, city: City) -> ExternalChannel:
         mode=ChannelMode.EMAIL,
         activation=ChannelActivation.TEST_ONLY,
         on_behalf_policy="allowed",
-        enabled=False,
+        enabled=True,
     )
     db.add(row)
     db.flush()

@@ -110,6 +110,78 @@ def _append_timeline(
     )
 
 
+def _channel_dispatch_eligible(channel: ExternalChannel) -> bool:
+    """Whether consent/dispatch may proceed for this external channel."""
+    activation = ChannelActivation(channel.activation)
+    if activation == ChannelActivation.DISABLED:
+        return False
+    if not channel.enabled:
+        return False
+
+    mode = ChannelMode(channel.mode)
+    is_guided = mode in {ChannelMode.GUIDED_PORTAL, ChannelMode.GUIDED_WHATSAPP}
+    if is_guided:
+        return activation in {
+            ChannelActivation.MANUAL,
+            ChannelActivation.LIVE_APPROVED,
+        }
+    if activation == ChannelActivation.TEST_ONLY:
+        return settings.fake_adapters_allowed
+    if activation in {ChannelActivation.AUTOMATED, ChannelActivation.LIVE_APPROVED}:
+        return settings.EXTERNAL_DISPATCH_GLOBAL_ENABLED
+    if activation == ChannelActivation.MANUAL:
+        return True
+    return False
+
+
+def _channel_label(channel: ExternalChannel) -> str:
+    if channel.routing_channel is not None and channel.routing_channel.label:
+        return channel.routing_channel.label
+    return f"{channel.channel_type} ({channel.mode})"
+
+
+def list_submission_channels(
+    db: Session,
+    *,
+    user_id: str,
+    complaint_id: uuid.UUID,
+) -> list[dict]:
+    complaint = db.get(Complaint, complaint_id)
+    if complaint is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Complaint not found")
+    if complaint.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    if complaint.city_id is None:
+        return []
+
+    channels = db.scalars(
+        select(ExternalChannel).where(ExternalChannel.city_id == complaint.city_id)
+    ).all()
+
+    items: list[dict] = []
+    for channel in channels:
+        activation = ChannelActivation(channel.activation)
+        if activation == ChannelActivation.DISABLED:
+            continue
+        # Hide TEST_ONLY channels outside test/dev fake-adapter mode.
+        if activation == ChannelActivation.TEST_ONLY and not settings.fake_adapters_allowed:
+            continue
+        url = channel.destination
+        if channel.routing_channel is not None and channel.routing_channel.url:
+            url = channel.routing_channel.url
+        items.append(
+            {
+                "id": channel.id,
+                "label": _channel_label(channel),
+                "channel_type": channel.channel_type,
+                "mode": channel.mode,
+                "enabled": _channel_dispatch_eligible(channel),
+                "url": url,
+            }
+        )
+    return items
+
+
 def create_consent(
     db: Session,
     *,
@@ -129,6 +201,16 @@ def create_consent(
     channel = db.get(ExternalChannel, channel_id)
     if channel is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
+    if complaint.city_id is not None and channel.city_id != complaint.city_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Channel is not available for this complaint city",
+        )
+    if not _channel_dispatch_eligible(channel):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Channel is not enabled for submission",
+        )
 
     consent = SubmissionConsent(
         complaint_id=complaint_id,
@@ -223,9 +305,10 @@ def create_intent_and_dispatch(
     if activation == ChannelActivation.DISABLED:
         return {**_not_enabled, "message": "Channel is disabled"}
 
+    if not channel.enabled:
+        return _not_enabled
+
     if is_guided:
-        if not channel.enabled:
-            return _not_enabled
         if activation not in {
             ChannelActivation.MANUAL,
             ChannelActivation.LIVE_APPROVED,
@@ -373,6 +456,11 @@ def attest_sent(
     }
     if attestation_note:
         payload["attestation_note"] = attestation_note
+    timeline_visibility = (
+        TimelineVisibility.OWNER
+        if complaint.is_sensitive
+        else TimelineVisibility.PUBLIC
+    )
     _append_timeline(
         db,
         complaint_id=intent.complaint_id,
@@ -381,7 +469,7 @@ def attest_sent(
         event_type="user_reported_sent",
         public_payload=payload,
         authenticity_level=TimelineAuthenticityLevel.USER_ASSERTED,
-        visibility=TimelineVisibility.PUBLIC,
+        visibility=timeline_visibility,
     )
     db.commit()
     db.refresh(intent)
@@ -394,11 +482,9 @@ def attach_reference(
     user_id: str,
     intent_id: uuid.UUID,
     reference_value: str,
-    reference_type: str = "official_token",
     tracking_url: str | None = None,
 ) -> ExternalReference:
     """Store a citizen-provided reference; never treated as verified registration."""
-    del reference_type  # client cannot claim official authenticity
     intent = db.get(SubmissionIntent, intent_id)
     if intent is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Intent not found")
@@ -416,6 +502,11 @@ def attach_reference(
         verified_at=None,
     )
     db.add(ref)
+    timeline_visibility = (
+        TimelineVisibility.OWNER
+        if complaint.is_sensitive
+        else TimelineVisibility.PUBLIC
+    )
     _append_timeline(
         db,
         complaint_id=intent.complaint_id,
@@ -428,7 +519,7 @@ def attach_reference(
             "note": "User-reported reference; not verified by CivicSense",
         },
         authenticity_level=TimelineAuthenticityLevel.USER_ASSERTED,
-        visibility=TimelineVisibility.PUBLIC,
+        visibility=timeline_visibility,
     )
     db.commit()
     db.refresh(ref)

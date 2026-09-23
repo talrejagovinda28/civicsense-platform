@@ -47,9 +47,19 @@ class AttestSentRequest(BaseModel):
 
 
 class AttachReferenceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     reference_value: str = Field(min_length=1, max_length=200)
-    reference_type: str = "official_token"
     tracking_url: str | None = None
+
+
+class SubmissionChannelSummary(BaseModel):
+    id: uuid.UUID
+    label: str
+    channel_type: str
+    mode: str
+    enabled: bool
+    url: str | None = None
 
 
 class ReconcileRequest(BaseModel):

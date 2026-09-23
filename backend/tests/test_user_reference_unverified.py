@@ -71,7 +71,6 @@ def test_attach_reference_stores_unverified(db, complaint, guided_intent):
         user_id=complaint.user_id,
         intent_id=guided_intent.id,
         reference_value="PMC-12345",
-        reference_type="official_token",
     )
     assert ref.reference_type == "user_provided_unverified"
     assert ref.verified_at is None

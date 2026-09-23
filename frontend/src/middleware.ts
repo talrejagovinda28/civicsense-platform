@@ -1,6 +1,8 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
+import { shouldEnableClerkFrontendProxy } from "@/lib/clerk-proxy";
+
 const isProtectedRoute = createRouteMatcher([
   "/dashboard(.*)",
   "/complaints/new(.*)",
@@ -12,35 +14,6 @@ const isProtectedRoute = createRouteMatcher([
 
 const isOfficerRoute = createRouteMatcher(["/officer(.*)"]);
 const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
-
-const configuredProxyUrl = process.env.NEXT_PUBLIC_CLERK_PROXY_URL?.trim() || "";
-
-/**
- * Clerk @7 auto-enables Frontend API proxy on `*.vercel.app` when it thinks
- * production keys / proxy are in play. Preview hosts must never use `/__clerk`
- * — they should call the development Frontend API directly.
- *
- * Enable proxy only on Vercel Production, and only for the host named in
- * NEXT_PUBLIC_CLERK_PROXY_URL (preserves the working Production setup).
- */
-function shouldEnableClerkFrontendProxy(requestUrl: URL): boolean {
-  // Preview / staging / development deployments: never proxy.
-  if (process.env.VERCEL_ENV && process.env.VERCEL_ENV !== "production") {
-    return false;
-  }
-  if (!configuredProxyUrl) {
-    return false;
-  }
-  if (/^https?:\/\//i.test(configuredProxyUrl)) {
-    try {
-      return requestUrl.hostname === new URL(configuredProxyUrl).hostname;
-    } catch {
-      return false;
-    }
-  }
-  // Relative proxy path (e.g. /__clerk) — Production Vercel only.
-  return process.env.VERCEL_ENV === "production";
-}
 
 function getRoleFromClaims(
   sessionClaims: Record<string, unknown> | null | undefined,
@@ -94,8 +67,7 @@ export default clerkMiddleware(
     }
   },
   {
-    // Always pass an explicit enabled function so Clerk does not auto-enable
-    // `/__clerk` on Preview `*.vercel.app` hosts.
+    // Explicit enabled fn prevents Clerk @7 auto-proxy on Preview *.vercel.app.
     frontendApiProxy: {
       enabled: (url) => shouldEnableClerkFrontendProxy(url),
     },
@@ -106,7 +78,6 @@ export const config = {
   matcher: [
     "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
     "/(api|trpc)(.*)",
-    // Keep matcher entries so Production proxy requests reach middleware when enabled.
     "/__clerk",
     "/__clerk/(.*)",
   ],

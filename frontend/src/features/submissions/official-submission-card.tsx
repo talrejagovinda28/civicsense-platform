@@ -13,9 +13,7 @@ import {
   dispatchSubmission,
   attestSubmissionSent,
   attachSubmissionReference,
-  getAccountability,
   getComplaintSubmissionChannels,
-  SubmissionChannelSummary,
 } from "@/lib/api";
 
 type OfficialSubmissionCardProps = {
@@ -54,9 +52,6 @@ export function OfficialSubmissionCard({ complaint }: OfficialSubmissionCardProp
     (complaint.user_id !== undefined &&
       complaint.user_id !== null &&
       complaint.user_id === userId);
-  const citySlug = complaint.city.toLowerCase().replace(/\s+/g, "-");
-  const mapLat = complaint.public_latitude ?? complaint.latitude ?? null;
-  const mapLng = complaint.public_longitude ?? complaint.longitude ?? null;
 
   const channelsQuery = useQuery({
     queryKey: ["submission-channels", complaint.id],
@@ -67,33 +62,18 @@ export function OfficialSubmissionCard({ complaint }: OfficialSubmissionCardProp
     enabled: isOwner,
   });
 
-  const accountabilityQuery = useQuery({
-    queryKey: ["accountability", citySlug, mapLat, mapLng, complaint.category.id],
-    queryFn: () =>
-      getAccountability(citySlug, mapLat!, mapLng!, complaint.category.id),
-    enabled: isOwner && mapLat !== null && mapLng !== null,
-  });
-
   const availableChannels = useMemo(() => {
+    // Only ExternalChannel IDs from the submission-channels API are valid for
+    // consent/dispatch. Do not fall back to accountability routing_channel IDs.
     const apiChannels = channelsQuery.data ?? [];
-    if (apiChannels.length > 0) {
-      return apiChannels.map((channel) => ({
-        id: channel.id,
-        label: channel.label,
-        url: channel.url ?? null,
-        enabled: channel.enabled,
-        source: "api" as const,
-      }));
-    }
-    const routing = accountabilityQuery.data?.routing_channels ?? [];
-    return routing.map((channel) => ({
+    return apiChannels.map((channel) => ({
       id: channel.id,
       label: channel.label,
-      url: channel.url,
-      enabled: channel.is_official,
-      source: "routing" as const,
+      url: channel.url ?? null,
+      enabled: channel.enabled,
+      source: "api" as const,
     }));
-  }, [channelsQuery.data, accountabilityQuery.data]);
+  }, [channelsQuery.data]);
 
   const consentMutation = useMutation({
     mutationFn: async (channelId: string) => {

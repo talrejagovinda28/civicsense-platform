@@ -49,7 +49,9 @@ from app.models import (  # noqa: F401
 )
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# Alembic uses ConfigParser: escape percent signs in URL-encoded passwords so
+# reading sqlalchemy.url restores the original URL without interpolation errors.
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

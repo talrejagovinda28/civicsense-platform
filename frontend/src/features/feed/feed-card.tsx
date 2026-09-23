@@ -11,19 +11,46 @@ type FeedCardProps = {
 };
 
 export function FeedCard({ item, engagementUnavailable }: FeedCardProps) {
-  const imageUrl = item.image_url ?? item.images?.[0]?.cloudinary_url ?? null;
+  const imageUrls = [
+    ...(item.images?.map((image) => image.cloudinary_url).filter(Boolean) ?? []),
+  ];
+  if (imageUrls.length === 0 && item.image_url) {
+    imageUrls.push(item.image_url);
+  }
+  const previewImages = imageUrls.slice(0, 3);
   const locality = item.locality_label ?? "Locality unavailable";
 
   return (
     <article className="overflow-hidden rounded-xl border border-civic bg-[var(--surface)] shadow-civic-sm transition hover:border-[var(--border-strong)]">
       <Link href={`/complaints/${item.complaint_id}`} className="block">
-        {imageUrl && (
+        {previewImages.length === 1 && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={imageUrl}
+            src={previewImages[0]}
             alt=""
             className="aspect-[16/10] w-full object-cover"
           />
+        )}
+
+        {previewImages.length > 1 && (
+          <div className="grid h-56 grid-cols-2 gap-0.5 bg-[var(--border)] sm:h-64">
+            {previewImages.map((src, index) => (
+              <div
+                key={src}
+                className={`relative overflow-hidden ${
+                  previewImages.length === 3 && index === 0 ? "row-span-2" : ""
+                }`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={src} alt="" className="h-full w-full object-cover" />
+                {index === previewImages.length - 1 && imageUrls.length > 3 && (
+                  <span className="absolute bottom-2 right-2 rounded-full bg-black/70 px-2 py-1 text-xs font-medium text-white">
+                    +{imageUrls.length - 3}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
         )}
 
         <div className="space-y-2 p-4">

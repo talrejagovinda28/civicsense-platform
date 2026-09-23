@@ -85,7 +85,7 @@ def get_my_reputation(
         ],
         unlocks=ReputationUnlocks(
             can_initiate_dm=can_initiate_dm(db, user_id),
-            can_create_group=can_create_group(db, user_id),
+            can_create_groups=can_create_group(db, user_id),
         ),
     )
 

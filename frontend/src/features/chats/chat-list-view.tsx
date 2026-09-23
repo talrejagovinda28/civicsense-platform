@@ -22,7 +22,7 @@ import { createGroupChat, getChats, getReputation } from "@/lib/api";
 
 export function ChatListView() {
 
-  const { getToken, isLoaded } = useAuth();
+  const { getToken, isLoaded, isSignedIn } = useAuth();
 
   const queryClient = useQueryClient();
 
@@ -54,7 +54,7 @@ export function ChatListView() {
 
     },
 
-    enabled: isLoaded,
+    enabled: isLoaded && Boolean(isSignedIn),
 
   });
 
@@ -78,7 +78,7 @@ export function ChatListView() {
 
     },
 
-    enabled: isLoaded,
+    enabled: isLoaded && Boolean(isSignedIn),
 
   });
 
@@ -144,9 +144,9 @@ export function ChatListView() {
 
 
 
-  const chats = chatsQuery.data ?? [];
+  const chats = Array.isArray(chatsQuery.data) ? chatsQuery.data : [];
 
-  const canCreateGroups = reputationQuery.data?.unlocks.can_create_groups ?? false;
+  const canCreateGroups = reputationQuery.data?.unlocks?.can_create_groups ?? false;
 
   const isEmpty = !chatsQuery.isLoading && chats.length === 0;
 

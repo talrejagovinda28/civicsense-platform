@@ -15,7 +15,7 @@ type ChatThreadViewProps = {
 };
 
 export function ChatThreadView({ chatId }: ChatThreadViewProps) {
-  const { getToken, isLoaded } = useAuth();
+  const { getToken, isLoaded, isSignedIn } = useAuth();
   const queryClient = useQueryClient();
   const [body, setBody] = useState("");
   const [sendError, setSendError] = useState<string | null>(null);
@@ -30,7 +30,7 @@ export function ChatThreadView({ chatId }: ChatThreadViewProps) {
       }
       return getChatMessages(token, chatId);
     },
-    enabled: isLoaded,
+    enabled: isLoaded && Boolean(isSignedIn),
     refetchInterval: () =>
       typeof document !== "undefined" && document.visibilityState === "visible"
         ? POLL_INTERVAL_MS
@@ -61,7 +61,7 @@ export function ChatThreadView({ chatId }: ChatThreadViewProps) {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messagesQuery.data?.items.length]);
+  }, [messagesQuery.data?.items?.length]);
 
   const unavailable = messagesQuery.data === null && !messagesQuery.isLoading;
 
@@ -85,7 +85,7 @@ export function ChatThreadView({ chatId }: ChatThreadViewProps) {
         )}
 
         <div className="flex-1 space-y-3 overflow-y-auto rounded-xl border border-civic bg-[var(--surface)] p-4">
-          {messagesQuery.data?.items.map((message) => (
+          {messagesQuery.data?.items?.map((message) => (
             <div key={message.id} className="rounded-lg bg-[var(--surface-muted)] px-3 py-2">
               <p className="text-xs font-medium text-civic-navy">
                 {message.sender_display_name}

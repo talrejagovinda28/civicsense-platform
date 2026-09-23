@@ -130,6 +130,7 @@ test.describe("Vercel Preview verification", () => {
       JSON.stringify(signals, null, 2),
     );
 
+    expect(signals.blockedByVercelSso, "Vercel SSO blocked dashboard").toBeFalsy();
     expect(signals.navStatus).toBeLessThan(500);
     expect(signals.bodyHasHostInvalid).toBeFalsy();
     expect(signals.clerkProxyHits).toEqual([]);
@@ -149,6 +150,7 @@ test.describe("Vercel Preview verification", () => {
       JSON.stringify(signals, null, 2),
     );
 
+    expect(signals.blockedByVercelSso, "Vercel SSO blocked complaints/new").toBeFalsy();
     expect(signals.navStatus).toBeLessThan(500);
     expect(signals.bodyHasHostInvalid).toBeFalsy();
     expect(signals.clerkProxyHits).toEqual([]);

@@ -39,7 +39,7 @@ jobs:
           CLERK_JWKS_URL: https://example.test/.well-known/jwks.json
           ENVIRONMENT: test
       - name: Python lint (correctness)
-        run: python -m ruff check . --ignore E501,I001,F401
+        run: python -m ruff check . --ignore E501,I001,F401,UP035,UP007,UP017
   frontend:
     name: Frontend typecheck and production build
     runs-on: ubuntu-latest

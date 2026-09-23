@@ -28,14 +28,14 @@ jobs:
       - name: Unit and API tests (isolated SQLite)
         run: python -m pytest -q
         env:
-          DATABASE_URL: sqlite:///:memory:
+          DATABASE_URL: 'sqlite:///:memory:'
           CLERK_JWKS_URL: https://example.test/.well-known/jwks.json
           ENVIRONMENT: test
           CIVICSENSE_ALLOW_FAKE_ADAPTERS: 'true'
       - name: Alembic migration graph (offline, no production DB)
         run: python -m alembic heads && python -m alembic history
         env:
-          DATABASE_URL: sqlite:///:memory:
+          DATABASE_URL: 'sqlite:///:memory:'
           CLERK_JWKS_URL: https://example.test/.well-known/jwks.json
           ENVIRONMENT: test
       - name: Python lint

@@ -20,6 +20,17 @@ def get_engagement_counts(
     complaint_id: uuid.UUID,
     viewer_id: str | None = None,
 ) -> EngagementCounts:
+    from app.services.schema_compat import social_tables_ready
+
+    if not social_tables_ready(db):
+        return EngagementCounts(
+            like_count=0,
+            affected_count=0,
+            comment_count=0,
+            viewer_liked=False,
+            viewer_affected=False,
+        )
+
     like_count = int(
         db.scalar(
             select(func.count()).select_from(Like).where(Like.complaint_id == complaint_id)

@@ -11,12 +11,18 @@ from app.core.deps import (
     get_optional_user,
     require_officer_or_admin,
 )
-from app.models.complaint_image import MediaVisibility
+from app.models.complaint_image import ComplaintImage, MediaVisibility
 from app.services.access import assert_complaint_case_access, is_privileged_role
 from app.core.security import ClerkUser
 from app.models.category import Category
 from app.models.city import City
 from app.models.complaint import Complaint, ComplaintStatus
+from app.services.schema_compat import (
+    complaint_images_v3_ready,
+    complaints_v3_ready,
+    load_only_existing,
+    table_columns,
+)
 from app.schemas.complaint import (
     ComplaintDetail,
     ComplaintFeedItem,
@@ -59,9 +65,9 @@ def _truncate(text: str, max_length: int = DESCRIPTION_PREVIEW_LENGTH) -> str:
     return text[: max_length - 3].rstrip() + "..."
 
 
-def _visible_images(complaint: Complaint, *, full_access: bool) -> list:
+def _visible_images(complaint: Complaint, *, full_access: bool, images_v3: bool = True) -> list:
     images = sorted(complaint.images, key=lambda image: image.sort_order)
-    if full_access:
+    if full_access or not images_v3:
         return images
     return [image for image in images if image.visibility == MediaVisibility.PUBLIC]
 
@@ -71,6 +77,7 @@ def _to_feed_item(
     *,
     truncate: bool,
     full_access: bool = False,
+    images_v3: bool = True,
 ) -> ComplaintFeedItem:
     description = (
         _truncate(complaint.description) if truncate else complaint.description
@@ -83,7 +90,9 @@ def _to_feed_item(
         category=complaint.category,
         ward=complaint.ward,
         city=complaint.city,
-        images=_visible_images(complaint, full_access=full_access),
+        images=_visible_images(
+            complaint, full_access=full_access, images_v3=images_v3
+        ),
         created_at=complaint.created_at,
         public_latitude=complaint.public_latitude,
         public_longitude=complaint.public_longitude,
@@ -100,7 +109,9 @@ def _can_view_full(complaint: Complaint, user: ClerkUser | None) -> bool:
     return complaint.user_id == user.user_id
 
 
-def _sensitive_visibility_filter(user: ClerkUser | None):
+def _sensitive_visibility_filter(user: ClerkUser | None, *, v3_ready: bool):
+    if not v3_ready:
+        return True
     if user is None or not is_privileged_role(user.role):
         if user is None:
             return Complaint.is_sensitive.is_(False)
@@ -136,7 +147,12 @@ def _status_history(
     ]
 
 
-def _to_detail(complaint: Complaint, user: ClerkUser | None) -> ComplaintDetail:
+def _to_detail(
+    complaint: Complaint,
+    user: ClerkUser | None,
+    *,
+    images_v3: bool = True,
+) -> ComplaintDetail:
     full_access = _can_view_full(complaint, user)
     return ComplaintDetail(
         id=complaint.id,
@@ -146,7 +162,9 @@ def _to_detail(complaint: Complaint, user: ClerkUser | None) -> ComplaintDetail:
         category=complaint.category,
         ward=complaint.ward,
         city=complaint.city,
-        images=_visible_images(complaint, full_access=full_access),
+        images=_visible_images(
+            complaint, full_access=full_access, images_v3=images_v3
+        ),
         created_at=complaint.created_at,
         updated_at=complaint.updated_at,
         address=complaint.address if full_access else None,
@@ -180,13 +198,26 @@ def _to_detail(complaint: Complaint, user: ClerkUser | None) -> ComplaintDetail:
     )
 
 
-def _complaint_stmt():
-    return select(Complaint).options(
+def _complaint_stmt(db: Session | None = None):
+    options: list = [
         joinedload(Complaint.category),
-        joinedload(Complaint.images),
         joinedload(Complaint.status_history),
         joinedload(Complaint.external_submission),
-    )
+    ]
+    if db is not None:
+        complaint_load = load_only_existing(Complaint, table_columns(db, "complaints"))
+        if complaint_load is not None:
+            options.insert(0, complaint_load)
+        image_load = load_only_existing(
+            ComplaintImage, table_columns(db, "complaint_images")
+        )
+        images_opt = joinedload(Complaint.images)
+        if image_load is not None:
+            images_opt = images_opt.options(image_load)
+        options.append(images_opt)
+    else:
+        options.append(joinedload(Complaint.images))
+    return select(Complaint).options(*options)
 
 
 def _apply_complaint_filters(
@@ -212,7 +243,7 @@ def _apply_complaint_filters(
 
 
 def _get_complaint_or_404(db: Session, complaint_id: uuid.UUID) -> Complaint:
-    stmt = _complaint_stmt().where(Complaint.id == complaint_id)
+    stmt = _complaint_stmt(db).where(Complaint.id == complaint_id)
     complaint = db.scalars(stmt).unique().first()
     if complaint is None:
         raise HTTPException(
@@ -233,8 +264,11 @@ def list_complaints(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> PaginatedComplaints:
-    visibility = _sensitive_visibility_filter(current_user)
-    base_stmt = select(Complaint)
+    v3_ready = complaints_v3_ready(db)
+    images_v3 = complaint_images_v3_ready(db)
+    visibility = _sensitive_visibility_filter(current_user, v3_ready=v3_ready)
+    # Count with PK only so pre-009 DBs are not queried for V3 columns.
+    base_stmt = select(Complaint.id)
     if visibility is not True:
         base_stmt = base_stmt.where(visibility)
     filtered_stmt = _apply_complaint_filters(
@@ -247,7 +281,7 @@ def list_complaints(
     total = db.scalar(select(func.count()).select_from(filtered_stmt.subquery())) or 0
 
     stmt = _apply_complaint_filters(
-        _complaint_stmt(),
+        _complaint_stmt(db),
         city_slug=city,
         electoral_ward_id=electoral_ward_id,
         status_filter=status_filter,
@@ -260,7 +294,9 @@ def list_complaints(
 
     logger.info("Public feed: %d complaints (city=%s)", total, city)
     return PaginatedComplaints(
-        items=[_to_feed_item(c, truncate=True) for c in complaints],
+        items=[
+            _to_feed_item(c, truncate=True, images_v3=images_v3) for c in complaints
+        ],
         total=total,
         skip=skip,
         limit=limit,
@@ -272,15 +308,19 @@ def list_my_complaints(
     db: Session = Depends(get_db),
     current_user: ClerkUser = Depends(get_current_user),
 ) -> list[ComplaintFeedItem]:
+    images_v3 = complaint_images_v3_ready(db)
     stmt = (
-        _complaint_stmt()
+        _complaint_stmt(db)
         .where(Complaint.user_id == current_user.user_id)
         .order_by(Complaint.created_at.desc())
     )
     complaints = db.scalars(stmt).unique().all()
 
     logger.info("User %s listed %d complaints", current_user.user_id, len(complaints))
-    return [_to_feed_item(c, truncate=False, full_access=True) for c in complaints]
+    return [
+        _to_feed_item(c, truncate=False, full_access=True, images_v3=images_v3)
+        for c in complaints
+    ]
 
 
 @router.get("/officer/queue", response_model=list[ComplaintFeedItem])
@@ -290,8 +330,9 @@ def list_officer_queue(
     city: str = Query(default="Pune"),
 ) -> list[ComplaintFeedItem]:
     del current_user
+    images_v3 = complaint_images_v3_ready(db)
     stmt = (
-        _complaint_stmt()
+        _complaint_stmt(db)
         .where(
             Complaint.city == city,
             Complaint.status.in_(OPEN_STATUSES),
@@ -300,7 +341,10 @@ def list_officer_queue(
     )
     complaints = db.scalars(stmt).unique().all()
     logger.info("Officer queue: %d open complaints (city=%s)", len(complaints), city)
-    return [_to_feed_item(c, truncate=False, full_access=True) for c in complaints]
+    return [
+        _to_feed_item(c, truncate=False, full_access=True, images_v3=images_v3)
+        for c in complaints
+    ]
 
 
 @router.post("/suggest-category", response_model=SuggestCategoryResponse)
@@ -326,7 +370,9 @@ def create_complaint_endpoint(
             detail=str(exc),
         ) from exc
     loaded = _get_complaint_or_404(db, complaint.id)
-    return _to_detail(loaded, current_user)
+    return _to_detail(
+        loaded, current_user, images_v3=complaint_images_v3_ready(db)
+    )
 
 
 @router.get("/{complaint_id}", response_model=ComplaintDetail)
@@ -339,7 +385,9 @@ def get_complaint(
     viewer_id = current_user.user_id if current_user else None
     viewer_role = current_user.role if current_user else None
     assert_complaint_case_access(db, complaint, viewer_id, viewer_role)
-    return _to_detail(complaint, current_user)
+    return _to_detail(
+        complaint, current_user, images_v3=complaint_images_v3_ready(db)
+    )
 
 
 @router.get("/{complaint_id}/timeline", response_model=TimelineListResponse)
@@ -372,7 +420,9 @@ def update_complaint_status_endpoint(
     complaint = _get_complaint_or_404(db, complaint_id)
     update_complaint_status(db, complaint, current_user, payload)
     loaded = _get_complaint_or_404(db, complaint_id)
-    return _to_detail(loaded, current_user)
+    return _to_detail(
+        loaded, current_user, images_v3=complaint_images_v3_ready(db)
+    )
 
 
 @router.post(
